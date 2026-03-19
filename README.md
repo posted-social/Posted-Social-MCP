@@ -1,8 +1,7 @@
 # Posted Social MCP Abilities
 
-**Version:** 2.0
+**Version:** 2.1
 **Requires:** WordPress 6.0+, WP Abilities API, Bricks Builder (for Bricks abilities), Rank Math SEO (for SEO abilities)
-**Tested up to:** WordPress 6.7
 
 WordPress plugin that exposes site content, SEO data, page structure, and Bricks Builder content to AI assistants via the MCP (Model Context Protocol) adapter.
 
@@ -10,27 +9,18 @@ WordPress plugin that exposes site content, SEO data, page structure, and Bricks
 
 ## Abilities Overview
 
-The plugin registers 10 abilities under the `postedsocial` category. Each ability is accessible through the MCP adapter and follows a read/write pattern with consistent error handling and input validation.
-
-### Read Abilities
-
-| # | Ability | Description |
-|---|---------|-------------|
-| 1 | `postedsocial/get-content` | Returns published pages and posts with full content, SEO meta, URL, dates, and word count |
-| 2 | `postedsocial/seo-audit` | Returns SEO meta for all published content with issue flags for missing or invalid fields |
-| 3 | `postedsocial/site-structure` | Returns the page hierarchy with parent/child relationships, slugs, and menu order |
-| 4 | `postedsocial/internal-links` | Analyzes outbound internal links found in post content for one or all pages |
-| 5 | `postedsocial/plugins-status` | Returns installed plugins with version, active status, and available updates |
-| 6 | `postedsocial/gravity-forms` | Lists Gravity Forms with entry counts, or returns recent entries for a specific form |
-| 7 | `postedsocial/get-bricks-content` | Returns Bricks Builder elements with IDs, types, parent relationships, and settings |
-
-### Write Abilities
-
-| # | Ability | Description |
-|---|---------|-------------|
-| 8 | `postedsocial/update-seo-meta` | Updates Rank Math fields: title, description, focus keyword, robots, canonical, schema type |
-| 9 | `postedsocial/update-bricks-content` | Modifies existing Bricks elements by ID. Merges settings, preserves unspecified fields |
-| 10 | `postedsocial/add-bricks-element` | Inserts new Bricks elements (code, text, heading, etc.) with positioning control |
+| # | Ability | Type | Description |
+|---|---------|------|-------------|
+| 1 | `postedsocial/get-content` | Read | Pages/posts with full content and SEO meta |
+| 2 | `postedsocial/seo-audit` | Read | SEO meta for all content with issue flags |
+| 3 | `postedsocial/site-structure` | Read | Page hierarchy with parent/child relationships |
+| 4 | `postedsocial/internal-links` | Read | Outbound internal links in post content |
+| 5 | `postedsocial/plugins-status` | Read | Installed plugins with versions and update status |
+| 6 | `postedsocial/gravity-forms` | Read | Forms list and recent entries |
+| 7 | `postedsocial/get-bricks-content` | Read | Bricks Builder elements with IDs, types, and settings |
+| 8 | `postedsocial/update-seo-meta` | Write | Update Rank Math title, description, keywords, robots, canonical |
+| 9 | `postedsocial/update-bricks-content` | Write | Modify existing Bricks elements by ID |
+| 10 | `postedsocial/manage-page-schema` | Write | Add/remove/list JSON-LD schema blocks rendered via wp_head |
 
 ---
 
@@ -38,11 +28,7 @@ The plugin registers 10 abilities under the `postedsocial` category. Each abilit
 
 ### 1. Get Site Content
 
-**Name:** `postedsocial/get-content`
-
-Retrieves published pages and posts with their full text content and Rank Math SEO meta.
-
-**Parameters:**
+Returns published pages and posts with their full text content and Rank Math SEO meta.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -50,128 +36,80 @@ Retrieves published pages and posts with their full text content and Rank Math S
 | `per_page` | integer | `50` | Number of items to return |
 | `search` | string | `""` | Optional keyword filter |
 
-**Returns:** `items` array with `id`, `title`, `url`, `post_type`, `date`, `modified`, `word_count`, `content`, `excerpt`, `seo_title`, `seo_description`, `focus_keyword`, `robots`, `canonical`.
-
 ---
 
 ### 2. SEO Audit
 
-**Name:** `postedsocial/seo-audit`
-
 Returns SEO meta for all published content with automated issue detection.
-
-**Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post_type` | string | `all` | `post`, `page`, or `all` |
 | `per_page` | integer | `100` | Number of items to return |
 
-**Returns:** `items` array with all SEO fields plus `seo_title_len`, `seo_desc_len`, `seo_score`, and `issues` array.
-
-**Issue flags:** `missing_seo_title`, `missing_meta_description`, `missing_focus_keyword`, `thin_content` (under 300 words), `meta_description_too_long` (over 160 chars), `seo_title_too_long` (over 60 chars).
+**Issue flags:** `missing_seo_title`, `missing_meta_description`, `missing_focus_keyword`, `thin_content`, `meta_description_too_long`, `seo_title_too_long`.
 
 ---
 
 ### 3. Site Structure
 
-**Name:** `postedsocial/site-structure`
-
-Returns the page hierarchy showing parent/child relationships.
-
-**Parameters:** None.
-
-**Returns:** `pages` array with `id`, `title`, `url`, `slug`, `parent_id`, `parent_title`, `menu_order`, `depth`, `template`.
+Returns the page hierarchy showing parent/child relationships. No parameters.
 
 ---
 
 ### 4. Internal Links
 
-**Name:** `postedsocial/internal-links`
-
-Analyzes internal linking by scanning `post_content` for anchor tags pointing to the same domain.
-
-**Parameters:**
+Scans `post_content` for internal anchor tags. Note: links rendered by Bricks Builder are not detected.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post_id` | integer | `0` | Specific page ID, or `0` for all |
 | `per_page` | integer | `50` | Number of pages to analyze |
 
-**Returns:** `items` array with `id`, `title`, `url`, `internal_links` (array of `url` and `anchor_text`), `link_count`.
-
-**Note:** This scans `post_content` only. Links rendered by Bricks Builder or other page builders that store content in custom meta fields will not be detected.
-
 ---
 
 ### 5. Plugins Status
 
-**Name:** `postedsocial/plugins-status`
-
-Returns all installed plugins with their current state.
-
-**Parameters:** None.
-
-**Returns:** `plugins` array with `file`, `name`, `version`, `active`, `update_available`, `update_version`, `author`.
+Returns all installed plugins with their current state. No parameters.
 
 ---
 
 ### 6. Gravity Forms Data
 
-**Name:** `postedsocial/gravity-forms`
-
 Lists forms or retrieves entries. Requires Gravity Forms to be active.
-
-**Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `form_id` | integer | `0` | Specific form ID for entries, or `0` to list all forms |
+| `form_id` | integer | `0` | Specific form ID for entries, or `0` to list all |
 | `per_page` | integer | `20` | Number of entries to return |
-
-**Returns:** When listing forms: `forms` array with `id`, `title`, `entry_count`, `is_active`. When fetching entries: `form` title and `entries` array with `entry_id`, `date_created`, `source_url`, `fields`.
 
 ---
 
 ### 7. Get Bricks Content
 
-**Name:** `postedsocial/get-bricks-content`
-
 Reads Bricks Builder elements from `_bricks_page_content_2` post meta.
-
-**Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post_id` | integer | *required* | Page/post ID |
-| `element_types` | array | `[]` | Filter by element type (e.g., `["heading", "text-basic"]`). Empty returns all |
-| `include_raw` | boolean | `false` | Include full raw settings object per element |
-
-**Returns:** `elements` array with `element_id`, `name`, `parent`, `label`, and common content fields (`text`, `tag`, `link`, `code`, `executeCode`, `noRender`, etc.). When `include_raw` is true, includes `raw_settings`.
+| `element_types` | array | `[]` | Filter by element type |
+| `include_raw` | boolean | `false` | Include full raw settings |
 
 ---
 
 ### 8. Update SEO Meta
 
-**Name:** `postedsocial/update-seo-meta`
-
-Updates Rank Math SEO fields for a specific page or post via `update_post_meta`.
-
-**Parameters:**
+Updates Rank Math SEO fields for a specific page or post.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post_id` | integer | *required* | Page/post ID |
-| `seo_title` | string | `""` | Rank Math title tag |
+| `seo_title` | string | `""` | Title tag |
 | `seo_description` | string | `""` | Meta description |
 | `focus_keyword` | string | `""` | Primary focus keyword |
-| `robots` | array | `[]` | Robots directives, e.g., `["noindex"]` |
+| `robots` | array | `[]` | e.g., `["noindex"]` |
 | `canonical` | string | `""` | Canonical URL |
-| `schema_type` | string | `""` | Rich snippet type (e.g., `Service`, `LocalBusiness`) |
-
-Empty fields are skipped (not cleared). All string values are sanitized with `sanitize_text_field`.
-
-**Returns:** `success`, `post_id`, `updated` (array of field names that were written).
+| `schema_type` | string | `""` | Rich snippet type |
 
 **Meta key mapping:**
 
@@ -188,11 +126,7 @@ Empty fields are skipped (not cleared). All string values are sanitized with `sa
 
 ### 9. Update Bricks Content
 
-**Name:** `postedsocial/update-bricks-content`
-
-Modifies existing Bricks elements by element ID. Settings are merged so unspecified fields are preserved.
-
-**Parameters:**
+Modifies existing Bricks elements by element ID. Settings are merged.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -200,93 +134,105 @@ Modifies existing Bricks elements by element ID. Settings are merged so unspecif
 | `updates` | array | *required* | Array of `{element_id, settings}` objects |
 | `dry_run` | boolean | `false` | Preview changes without saving |
 
-**Behavior:**
-- Array settings are shallow-merged (`array_merge`)
-- Scalar settings are replaced
-- A timestamped backup of the original content is saved to `_bricks_page_content_2_backup_YYYYMMDD_HHMMSS`
-- Bricks render cache (`_html` and `_css` meta) is cleared after save
-- Post object cache is flushed
-
-**Returns:** `success`, `changes` (detailed diff per element), `not_found` (unmatched IDs), `elements_updated`, `backup_key`.
-
 ---
 
-### 10. Add Bricks Element
+### 10. Manage Page Schema
 
-**Name:** `postedsocial/add-bricks-element`
+Add, list, or remove JSON-LD schema blocks for any page. Schemas are stored in the `_ps_page_schemas` post meta field and rendered in the document `<head>` via a `wp_head` hook. This approach bypasses Bricks Builder entirely and works reliably with any theme or page builder.
 
-Inserts a new element into the Bricks page content array. This is the ability to use for injecting JSON-LD schema, adding new text blocks, or inserting any Bricks-compatible element.
-
-**Parameters:**
+Each schema is identified by a unique key (e.g., "service", "localbusiness") so individual schemas can be added, replaced, or removed without affecting others on the same page.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post_id` | integer | *required* | Page/post ID |
-| `element` | object | *required* | Element definition (see below) |
-| `position` | string | `"last"` | Insertion point (see below) |
-| `dry_run` | boolean | `false` | Preview without saving |
+| `action` | string | `"list"` | `"add"`, `"remove"`, `"list"`, or `"clear"` |
+| `key` | string | `""` | Unique schema key. Required for `add` and `remove` |
+| `data` | object | — | Schema.org JSON-LD object. Required for `add`. Must include `@type` |
 
-**Element object:**
+**Actions:**
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | string | yes | Bricks element type: `code`, `text-basic`, `heading`, `html`, `block`, `container`, `section` |
-| `parent` | string | no | Parent element ID, or `"0"` for top-level. Default `"0"` |
-| `label` | string | no | Admin label visible in Bricks editor |
-| `settings` | object | yes | Element settings (varies by type) |
+| Action | Description |
+|--------|-------------|
+| `add` | Adds or replaces a schema by key. Requires `key` and `data`. |
+| `remove` | Removes a schema by key. Requires `key`. |
+| `list` | Lists all schemas for the page with keys, types, and timestamps. |
+| `clear` | Removes all schemas for the page. |
 
-**Position values:**
+**How it works:**
 
-| Value | Behavior |
-|-------|----------|
-| `"first"` | Before the first sibling with the same parent |
-| `"last"` | End of the element array (default) |
-| `"before:element_id"` | Directly before the specified element |
-| `"after:element_id"` | After the specified element and all its descendants |
+1. Schema data is stored as a serialized array in `_ps_page_schemas` post meta
+2. On every page load, the `wp_head` hook checks for stored schemas
+3. Each schema is output as a `<script type="application/ld+json">` block in the `<head>`
+4. The `@context` field is auto-added if not provided
 
-**Common settings by element type:**
-
-```
-code:       {"code": "<script>...</script>", "executeCode": true, "noRender": true}
-text-basic: {"text": "Your content here"}
-heading:    {"text": "Your heading", "tag": "h2"}
-section:    {} (structural wrapper)
-container:  {} (structural wrapper)
-block:      {} (structural wrapper)
-```
-
-**Example: Inject Service schema JSON-LD**
+**Example: Add Service schema to a page**
 
 ```json
 {
   "post_id": 20,
-  "element": {
-    "name": "code",
-    "parent": "0",
-    "label": "Service Schema",
-    "settings": {
-      "code": "<script type=\"application/ld+json\">{\"@context\":\"https://schema.org\",\"@type\":\"Service\",\"name\":\"Milling Services\"}</script>",
-      "executeCode": true,
-      "noRender": true
-    }
-  },
-  "position": "after:lujewj"
+  "action": "add",
+  "key": "service",
+  "data": {
+    "@type": "Service",
+    "name": "Precision Milling Services",
+    "description": "CNC and manual milling for heavy equipment parts.",
+    "provider": {
+      "@type": "LocalBusiness",
+      "name": "Wesco Machine Works",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "851 Westwood Industrial Park Drive",
+        "addressLocality": "Weldon Spring",
+        "addressRegion": "MO",
+        "postalCode": "63304",
+        "addressCountry": "US"
+      },
+      "telephone": "+1-636-939-5905",
+      "url": "https://wescoworks.com"
+    },
+    "areaServed": {
+      "@type": "GeoCircle",
+      "geoMidpoint": {
+        "@type": "GeoCoordinates",
+        "latitude": 38.6631,
+        "longitude": -90.6879
+      },
+      "geoRadius": "80467"
+    },
+    "serviceType": "Precision Milling",
+    "url": "https://wescoworks.com/capabilities/milling/"
+  }
 }
 ```
 
-**Returns:** `success`, `element_id` (generated), `element` (full object), `position` (array index), `backup_key`.
+**Example: List schemas for a page**
+
+```json
+{
+  "post_id": 20,
+  "action": "list"
+}
+```
+
+**Example: Remove a schema**
+
+```json
+{
+  "post_id": 20,
+  "action": "remove",
+  "key": "service"
+}
+```
 
 ---
 
 ## Safety Features
 
-All write abilities include the following protections:
-
-- **Backup on write:** Every Bricks content modification saves a timestamped backup to a separate meta key (`_bricks_page_content_2_backup_YYYYMMDD_HHMMSS`) before overwriting
-- **Dry run mode:** Both `update-bricks-content` and `add-bricks-element` accept `dry_run: true` to preview changes without saving
-- **Cache clearing:** Bricks render cache and WordPress object cache are cleared after every write to ensure changes are reflected immediately
-- **Input sanitization:** All SEO meta values are passed through `sanitize_text_field`; robots directives are individually sanitized
-- **Collision-free IDs:** New Bricks element IDs are generated using random lowercase strings and checked against existing IDs to prevent collisions
+- **Bricks backup on write:** Every Bricks content modification saves a timestamped backup
+- **Dry run mode:** `update-bricks-content` supports `dry_run: true` for previewing changes
+- **Cache clearing:** Bricks render cache and WP object cache are cleared after writes
+- **Input sanitization:** SEO meta values are passed through `sanitize_text_field`
+- **Schema keys:** `sanitize_key` is applied to all schema keys
 
 ---
 
@@ -296,25 +242,23 @@ All write abilities include the following protections:
 |------------|-------------|--------|
 | WP Abilities API | All abilities | Required |
 | MCP Adapter | MCP protocol access | Required |
-| Rank Math SEO | `seo-audit`, `get-content`, `update-seo-meta` | Optional (SEO fields return empty if not installed) |
-| Bricks Builder | `get-bricks-content`, `update-bricks-content`, `add-bricks-element` | Optional (returns empty/error if no Bricks content) |
-| Gravity Forms | `gravity-forms` | Optional (returns error message if not active) |
+| Rank Math SEO | SEO abilities | Optional |
+| Bricks Builder | Bricks abilities | Optional |
+| Gravity Forms | `gravity-forms` | Optional |
 
 ---
 
 ## Changelog
 
-### 2.0
-- Added `postedsocial/add-bricks-element` ability for inserting new elements into Bricks pages
-- Added `code`, `executeCode`, and `noRender` to common fields in `get-bricks-content`
-- Extracted shared helpers: `ps_generate_bricks_id`, `ps_get_bricks_elements`, `ps_save_bricks_elements`
-- Added `defined('ABSPATH')` security guard
-- Code cleanup and documentation improvements
+### 2.1
+- **Replaced** `add-bricks-element` with `manage-page-schema` — Bricks strips code elements added outside its editor, so schema is now stored in its own post meta field and rendered via `wp_head`
+- Added `wp_head` hook (`ps_render_page_schema`) that outputs JSON-LD from `_ps_page_schemas` post meta
+- Schema management supports add, remove, list, and clear actions with unique keys per schema
+- Removed `add-bricks-element` ability (Bricks Builder overwrites elements added via `update_post_meta`)
 
-### 1.2
-- Added `postedsocial/update-seo-meta` for writing Rank Math meta fields
-- Added `postedsocial/get-bricks-content` for reading Bricks Builder elements
-- Added `postedsocial/update-bricks-content` for modifying existing Bricks elements
+### 2.0
+- Added Bricks read/write abilities and `update-seo-meta`
+- Extracted shared helpers for Bricks content management
 
 ### 1.0
-- Initial release with read-only abilities: get-content, seo-audit, site-structure, internal-links, plugins-status, gravity-forms
+- Initial release with read-only abilities

@@ -2,11 +2,42 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.0
+ * Version: 2.1
  * Author: Posted Social
  */
 
 defined( 'ABSPATH' ) || exit;
+
+// ─── Schema Output via wp_head ──────────────────────────────────────────────
+
+add_action( 'wp_head', 'ps_render_page_schema', 1 );
+
+function ps_render_page_schema() {
+    if ( ! is_singular() ) {
+        return;
+    }
+
+    $post_id = get_the_ID();
+    if ( ! $post_id ) {
+        return;
+    }
+
+    $schemas = get_post_meta( $post_id, '_ps_page_schemas', true );
+    if ( empty( $schemas ) || ! is_array( $schemas ) ) {
+        return;
+    }
+
+    foreach ( $schemas as $schema ) {
+        if ( empty( $schema['data'] ) ) {
+            continue;
+        }
+
+        $json = wp_json_encode( $schema['data'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT );
+        if ( $json ) {
+            echo "\n" . '<script type="application/ld+json">' . "\n" . $json . "\n" . '</script>' . "\n";
+        }
+    }
+}
 
 // ─── Category ───────────────────────────────────────────────────────────────
 
@@ -228,7 +259,7 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Get Bricks Content',
-            'description'         => 'Returns Bricks Builder elements for a page with element IDs, types, parent relationships, and settings (text, links, tags). Use to inspect page structure before making edits.',
+            'description'         => 'Returns Bricks Builder elements for a page with element IDs, types, parent relationships, and settings.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
@@ -277,40 +308,13 @@ function ps_register_abilities() {
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id'         => array(
-                        'type'        => 'integer',
-                        'description' => 'The post/page ID to update. Required.',
-                    ),
-                    'focus_keyword'   => array(
-                        'type'        => 'string',
-                        'description' => 'Primary focus keyword for Rank Math.',
-                        'default'     => '',
-                    ),
-                    'seo_title'       => array(
-                        'type'        => 'string',
-                        'description' => 'SEO title tag. Leave empty to skip.',
-                        'default'     => '',
-                    ),
-                    'seo_description' => array(
-                        'type'        => 'string',
-                        'description' => 'Meta description. Leave empty to skip.',
-                        'default'     => '',
-                    ),
-                    'robots'          => array(
-                        'type'        => 'array',
-                        'description' => 'Robots directives array, e.g. ["noindex"]. Leave empty to skip.',
-                        'default'     => array(),
-                    ),
-                    'canonical'       => array(
-                        'type'        => 'string',
-                        'description' => 'Canonical URL. Leave empty to skip.',
-                        'default'     => '',
-                    ),
-                    'schema_type'     => array(
-                        'type'        => 'string',
-                        'description' => 'Rank Math rich snippet type, e.g. "Article", "LocalBusiness", "Service". Leave empty to skip.',
-                        'default'     => '',
-                    ),
+                    'post_id'         => array( 'type' => 'integer', 'description' => 'The post/page ID to update. Required.' ),
+                    'focus_keyword'   => array( 'type' => 'string', 'description' => 'Primary focus keyword.', 'default' => '' ),
+                    'seo_title'       => array( 'type' => 'string', 'description' => 'SEO title tag.', 'default' => '' ),
+                    'seo_description' => array( 'type' => 'string', 'description' => 'Meta description.', 'default' => '' ),
+                    'robots'          => array( 'type' => 'array', 'description' => 'Robots directives, e.g. ["noindex"].', 'default' => array() ),
+                    'canonical'       => array( 'type' => 'string', 'description' => 'Canonical URL.', 'default' => '' ),
+                    'schema_type'     => array( 'type' => 'string', 'description' => 'Rank Math rich snippet type.', 'default' => '' ),
                 ),
                 'required' => array( 'post_id' ),
             ),
@@ -334,37 +338,24 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Update Bricks Content',
-            'description'         => 'Updates specific Bricks Builder elements by element ID. Can modify text, links, tags, and other settings. Backs up existing content before writing and clears render cache after.',
+            'description'         => 'Updates specific Bricks Builder elements by element ID. Merges settings, preserves unspecified fields. Backs up before writing.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id' => array(
-                        'type'        => 'integer',
-                        'description' => 'The post/page ID to update. Required.',
-                    ),
+                    'post_id' => array( 'type' => 'integer', 'description' => 'The post/page ID to update. Required.' ),
                     'updates' => array(
                         'type'        => 'array',
-                        'description' => 'Array of element updates. Each item needs "element_id" and "settings" to merge.',
+                        'description' => 'Array of {element_id, settings} objects.',
                         'items'       => array(
                             'type'       => 'object',
                             'properties' => array(
-                                'element_id' => array(
-                                    'type'        => 'string',
-                                    'description' => 'The Bricks element ID to update.',
-                                ),
-                                'settings'   => array(
-                                    'type'        => 'object',
-                                    'description' => 'Settings fields to update. Only specified fields are changed.',
-                                ),
+                                'element_id' => array( 'type' => 'string' ),
+                                'settings'   => array( 'type' => 'object' ),
                             ),
                             'required' => array( 'element_id', 'settings' ),
                         ),
                     ),
-                    'dry_run' => array(
-                        'type'        => 'boolean',
-                        'description' => 'If true, returns what would change without saving. Default false.',
-                        'default'     => false,
-                    ),
+                    'dry_run' => array( 'type' => 'boolean', 'description' => 'Preview without saving.', 'default' => false ),
                 ),
                 'required' => array( 'post_id', 'updates' ),
             ),
@@ -384,120 +375,62 @@ function ps_register_abilities() {
         )
     );
 
-    // 10. Add Bricks element
+    // 10. Manage page schema
     wp_register_ability(
-        'postedsocial/add-bricks-element',
+        'postedsocial/manage-page-schema',
         array(
             'category'            => 'postedsocial',
-            'label'               => 'Add Bricks Element',
-            'description'         => 'Inserts a new Bricks Builder element into a page. Supports adding code elements (for JSON-LD schema, custom scripts), text, headings, and other element types. Backs up content before writing.',
+            'label'               => 'Manage Page Schema',
+            'description'         => 'Add, list, or remove JSON-LD schema blocks for a page. Schemas are stored in post meta (_ps_page_schemas) and rendered in <head> via wp_head. Supports any schema.org type. Each schema has a unique key for management.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id'  => array(
-                        'type'        => 'integer',
-                        'description' => 'The post/page ID to add the element to. Required.',
-                    ),
-                    'element'  => array(
-                        'type'        => 'object',
-                        'description' => 'The element to insert.',
-                        'properties'  => array(
-                            'name'     => array(
-                                'type'        => 'string',
-                                'description' => 'Bricks element type: "code", "text-basic", "heading", "html", "block", "container", "section". Required.',
-                            ),
-                            'parent'   => array(
-                                'type'        => 'string',
-                                'description' => 'Parent element ID to nest under. Use "0" or empty for top-level (root). Default "0".',
-                                'default'     => '0',
-                            ),
-                            'label'    => array(
-                                'type'        => 'string',
-                                'description' => 'Optional admin label for the element in Bricks editor.',
-                                'default'     => '',
-                            ),
-                            'settings' => array(
-                                'type'        => 'object',
-                                'description' => 'Element settings. For "code" elements use {"code": "<script>...</script>", "executeCode": true, "noRender": true}. For "text-basic" use {"text": "..."}. For "heading" use {"text": "...", "tag": "h2"}.',
-                            ),
-                        ),
-                        'required' => array( 'name', 'settings' ),
-                    ),
-                    'position' => array(
-                        'type'        => 'string',
-                        'description' => 'Where to insert: "first" (beginning of parent), "last" (end of parent), "before:element_id", "after:element_id". Default "last".',
-                        'default'     => 'last',
-                    ),
-                    'dry_run'  => array(
-                        'type'        => 'boolean',
-                        'description' => 'If true, returns what would be added without saving. Default false.',
-                        'default'     => false,
-                    ),
+                    'post_id' => array( 'type' => 'integer', 'description' => 'The post/page ID. Required.' ),
+                    'action'  => array( 'type' => 'string', 'description' => '"add", "remove", "list", or "clear". Default "list".', 'default' => 'list' ),
+                    'key'     => array( 'type' => 'string', 'description' => 'Unique key for the schema. Required for "add" and "remove".', 'default' => '' ),
+                    'data'    => array( 'type' => 'object', 'description' => 'Schema.org JSON-LD data object. Required for "add". Must include @type.' ),
                 ),
-                'required' => array( 'post_id', 'element' ),
+                'required' => array( 'post_id' ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'success'    => array( 'type' => 'boolean' ),
-                    'post_id'    => array( 'type' => 'integer' ),
-                    'element_id' => array( 'type' => 'string' ),
-                    'dry_run'    => array( 'type' => 'boolean' ),
-                    'element'    => array( 'type' => 'object' ),
-                    'position'   => array( 'type' => 'integer' ),
+                    'success' => array( 'type' => 'boolean' ),
+                    'post_id' => array( 'type' => 'integer' ),
+                    'action'  => array( 'type' => 'string' ),
+                    'schemas' => array( 'type' => 'array' ),
                 ),
             ),
             'permission_callback' => '__return_true',
-            'execute_callback'    => 'ps_add_bricks_element_execute',
+            'execute_callback'    => 'ps_manage_page_schema_execute',
             'meta'                => array( 'mcp' => array( 'public' => true ) ),
         )
     );
 }
 
-// ─── Helper: Generate Bricks Element ID ─────────────────────────────────────
-
-function ps_generate_bricks_id( $length = 6 ) {
-    $chars = 'abcdefghijklmnopqrstuvwxyz';
-    $id    = '';
-    for ( $i = 0; $i < $length; $i++ ) {
-        $id .= $chars[ wp_rand( 0, strlen( $chars ) - 1 ) ];
-    }
-    return $id;
-}
-
-// ─── Helper: Load and Parse Bricks Content ──────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 function ps_get_bricks_elements( $post_id ) {
     $meta = get_post_meta( $post_id, '_bricks_page_content_2', true );
-
     if ( empty( $meta ) ) {
         return array();
     }
-
     return is_string( $meta ) ? json_decode( $meta, true ) : (array) $meta;
 }
 
-// ─── Helper: Save Bricks Content with Backup ────────────────────────────────
-
 function ps_save_bricks_elements( $post_id, $elements, $original_meta = null ) {
-    // Backup.
     if ( null !== $original_meta ) {
         $backup_key = '_bricks_page_content_2_backup_' . gmdate( 'Ymd_His' );
         update_post_meta( $post_id, $backup_key, $original_meta );
     }
-
-    // Save.
     update_post_meta( $post_id, '_bricks_page_content_2', $elements );
-
-    // Clear Bricks render cache.
     delete_post_meta( $post_id, '_bricks_page_content_2_html' );
     delete_post_meta( $post_id, '_bricks_page_content_2_css' );
     clean_post_cache( $post_id );
-
     return isset( $backup_key ) ? $backup_key : '';
 }
 
-// ─── Callback: Get Content ──────────────────────────────────────────────────
+// ─── Callbacks ──────────────────────────────────────────────────────────────
 
 function ps_get_content_execute( $input ) {
     $post_type = isset( $input['post_type'] ) ? $input['post_type'] : 'all';
@@ -511,7 +444,6 @@ function ps_get_content_execute( $input ) {
         'order'          => 'DESC',
         'post_type'      => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
     );
-
     if ( ! empty( $search ) ) {
         $args['s'] = $search;
     }
@@ -521,7 +453,6 @@ function ps_get_content_execute( $input ) {
 
     foreach ( $query->posts as $post ) {
         $content = wp_strip_all_tags( $post->post_content );
-
         $items[] = array(
             'id'              => $post->ID,
             'title'           => $post->post_title,
@@ -531,9 +462,7 @@ function ps_get_content_execute( $input ) {
             'modified'        => get_the_modified_date( 'Y-m-d', $post->ID ),
             'word_count'      => str_word_count( $content ),
             'content'         => $content,
-            'excerpt'         => has_excerpt( $post->ID )
-                ? get_the_excerpt( $post )
-                : wp_trim_words( $post->post_content, 40 ),
+            'excerpt'         => has_excerpt( $post->ID ) ? get_the_excerpt( $post ) : wp_trim_words( $post->post_content, 40 ),
             'seo_title'       => get_post_meta( $post->ID, 'rank_math_title', true ),
             'seo_description' => get_post_meta( $post->ID, 'rank_math_description', true ),
             'focus_keyword'   => get_post_meta( $post->ID, 'rank_math_focus_keyword', true ),
@@ -542,13 +471,8 @@ function ps_get_content_execute( $input ) {
         );
     }
 
-    return array(
-        'items' => $items,
-        'total' => $query->found_posts,
-    );
+    return array( 'items' => $items, 'total' => $query->found_posts );
 }
-
-// ─── Callback: SEO Audit ────────────────────────────────────────────────────
 
 function ps_seo_audit_execute( $input ) {
     $post_type = isset( $input['post_type'] ) ? $input['post_type'] : 'all';
@@ -563,7 +487,6 @@ function ps_seo_audit_execute( $input ) {
     ) );
 
     $items = array();
-
     foreach ( $query->posts as $post ) {
         $content   = wp_strip_all_tags( $post->post_content );
         $seo_title = get_post_meta( $post->ID, 'rank_math_title', true );
@@ -571,11 +494,11 @@ function ps_seo_audit_execute( $input ) {
         $focus_kw  = get_post_meta( $post->ID, 'rank_math_focus_keyword', true );
 
         $issues = array();
-        if ( empty( $seo_title ) )                          $issues[] = 'missing_seo_title';
-        if ( empty( $seo_desc ) )                           $issues[] = 'missing_meta_description';
-        if ( empty( $focus_kw ) )                           $issues[] = 'missing_focus_keyword';
-        if ( str_word_count( $content ) < 300 )             $issues[] = 'thin_content';
-        if ( ! empty( $seo_desc ) && strlen( $seo_desc ) > 160 ) $issues[] = 'meta_description_too_long';
+        if ( empty( $seo_title ) )                                $issues[] = 'missing_seo_title';
+        if ( empty( $seo_desc ) )                                 $issues[] = 'missing_meta_description';
+        if ( empty( $focus_kw ) )                                 $issues[] = 'missing_focus_keyword';
+        if ( str_word_count( $content ) < 300 )                   $issues[] = 'thin_content';
+        if ( ! empty( $seo_desc ) && strlen( $seo_desc ) > 160 )  $issues[] = 'meta_description_too_long';
         if ( ! empty( $seo_title ) && strlen( $seo_title ) > 60 ) $issues[] = 'seo_title_too_long';
 
         $items[] = array(
@@ -597,20 +520,11 @@ function ps_seo_audit_execute( $input ) {
         );
     }
 
-    return array(
-        'items' => $items,
-        'total' => $query->found_posts,
-    );
+    return array( 'items' => $items, 'total' => $query->found_posts );
 }
 
-// ─── Callback: Site Structure ───────────────────────────────────────────────
-
 function ps_site_structure_execute( $input ) {
-    $pages = get_pages( array(
-        'sort_column' => 'menu_order, post_title',
-        'sort_order'  => 'ASC',
-    ) );
-
+    $pages = get_pages( array( 'sort_column' => 'menu_order, post_title', 'sort_order' => 'ASC' ) );
     $items = array();
 
     foreach ( $pages as $page ) {
@@ -619,7 +533,6 @@ function ps_site_structure_execute( $input ) {
             $parent = get_post( $page->post_parent );
             $parent_title = $parent ? $parent->post_title : '';
         }
-
         $items[] = array(
             'id'           => $page->ID,
             'title'        => $page->post_title,
@@ -633,13 +546,8 @@ function ps_site_structure_execute( $input ) {
         );
     }
 
-    return array(
-        'pages' => $items,
-        'total' => count( $items ),
-    );
+    return array( 'pages' => $items, 'total' => count( $items ) );
 }
-
-// ─── Callback: Internal Links ───────────────────────────────────────────────
 
 function ps_internal_links_execute( $input ) {
     $post_id  = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
@@ -650,55 +558,34 @@ function ps_internal_links_execute( $input ) {
         $posts = array( get_post( $post_id ) );
     } else {
         $query = new WP_Query( array(
-            'post_status'    => 'publish',
-            'posts_per_page' => $per_page,
-            'post_type'      => array( 'post', 'page' ),
+            'post_status' => 'publish', 'posts_per_page' => $per_page, 'post_type' => array( 'post', 'page' ),
         ) );
         $posts = $query->posts;
     }
 
     $items = array();
-
     foreach ( $posts as $post ) {
-        if ( ! $post ) {
-            continue;
-        }
-
-        $content = $post->post_content;
-        $links   = array();
-
-        if ( preg_match_all( '/<a\s[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/si', $content, $matches ) ) {
+        if ( ! $post ) continue;
+        $links = array();
+        if ( preg_match_all( '/<a\s[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/si', $post->post_content, $matches ) ) {
             foreach ( $matches[1] as $i => $href ) {
                 if ( strpos( $href, $site_url ) === 0 || strpos( $href, '/' ) === 0 ) {
-                    $links[] = array(
-                        'url'         => $href,
-                        'anchor_text' => wp_strip_all_tags( $matches[2][ $i ] ),
-                    );
+                    $links[] = array( 'url' => $href, 'anchor_text' => wp_strip_all_tags( $matches[2][ $i ] ) );
                 }
             }
         }
-
         $items[] = array(
-            'id'             => $post->ID,
-            'title'          => $post->post_title,
-            'url'            => get_permalink( $post->ID ),
-            'internal_links' => $links,
-            'link_count'     => count( $links ),
+            'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ),
+            'internal_links' => $links, 'link_count' => count( $links ),
         );
     }
 
     return array( 'items' => $items );
 }
 
-// ─── Callback: Plugins Status ───────────────────────────────────────────────
-
 function ps_plugins_status_execute( $input ) {
-    if ( ! function_exists( 'get_plugins' ) ) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
-    }
-    if ( ! function_exists( 'get_plugin_updates' ) ) {
-        require_once ABSPATH . 'wp-admin/includes/update.php';
-    }
+    if ( ! function_exists( 'get_plugins' ) ) require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    if ( ! function_exists( 'get_plugin_updates' ) ) require_once ABSPATH . 'wp-admin/includes/update.php';
 
     $all_plugins    = get_plugins();
     $active_plugins = get_option( 'active_plugins', array() );
@@ -706,32 +593,23 @@ function ps_plugins_status_execute( $input ) {
     $items          = array();
 
     foreach ( $all_plugins as $file => $data ) {
-        $has_update     = isset( $updates[ $file ] );
-        $update_version = $has_update ? $updates[ $file ]->update->new_version : '';
-
-        $items[] = array(
+        $has_update = isset( $updates[ $file ] );
+        $items[]    = array(
             'file'             => $file,
             'name'             => $data['Name'],
             'version'          => $data['Version'],
             'active'           => in_array( $file, $active_plugins, true ),
             'update_available' => $has_update,
-            'update_version'   => $update_version,
+            'update_version'   => $has_update ? $updates[ $file ]->update->new_version : '',
             'author'           => $data['AuthorName'],
         );
     }
 
-    return array(
-        'plugins' => $items,
-        'total'   => count( $items ),
-    );
+    return array( 'plugins' => $items, 'total' => count( $items ) );
 }
 
-// ─── Callback: Gravity Forms ────────────────────────────────────────────────
-
 function ps_gravity_forms_execute( $input ) {
-    if ( ! class_exists( 'GFAPI' ) ) {
-        return array( 'error' => 'Gravity Forms is not active on this site.' );
-    }
+    if ( ! class_exists( 'GFAPI' ) ) return array( 'error' => 'Gravity Forms is not active.' );
 
     $form_id  = isset( $input['form_id'] ) ? intval( $input['form_id'] ) : 0;
     $per_page = isset( $input['per_page'] ) ? intval( $input['per_page'] ) : 20;
@@ -739,94 +617,50 @@ function ps_gravity_forms_execute( $input ) {
     if ( 0 === $form_id ) {
         $forms = GFAPI::get_forms();
         $items = array();
-
         foreach ( $forms as $form ) {
-            $items[] = array(
-                'id'          => $form['id'],
-                'title'       => $form['title'],
-                'entry_count' => GFAPI::count_entries( $form['id'] ),
-                'is_active'   => (bool) $form['is_active'],
-            );
+            $items[] = array( 'id' => $form['id'], 'title' => $form['title'], 'entry_count' => GFAPI::count_entries( $form['id'] ), 'is_active' => (bool) $form['is_active'] );
         }
-
         return array( 'forms' => $items );
     }
 
-    $entries = GFAPI::get_entries(
-        $form_id,
-        array( 'status' => 'active' ),
-        array( 'key' => 'date_created', 'direction' => 'DESC' ),
-        array( 'offset' => 0, 'page_size' => $per_page )
-    );
-
-    $form   = GFAPI::get_form( $form_id );
-    $fields = array();
+    $entries = GFAPI::get_entries( $form_id, array( 'status' => 'active' ), array( 'key' => 'date_created', 'direction' => 'DESC' ), array( 'offset' => 0, 'page_size' => $per_page ) );
+    $form    = GFAPI::get_form( $form_id );
+    $fields  = array();
     if ( $form && isset( $form['fields'] ) ) {
-        foreach ( $form['fields'] as $field ) {
-            $fields[ $field->id ] = $field->label;
-        }
+        foreach ( $form['fields'] as $field ) $fields[ $field->id ] = $field->label;
     }
 
     $items = array();
     foreach ( $entries as $entry ) {
-        $entry_data = array(
-            'entry_id'     => $entry['id'],
-            'date_created' => $entry['date_created'],
-            'source_url'   => $entry['source_url'],
-            'fields'       => array(),
-        );
-
-        foreach ( $fields as $field_id => $label ) {
-            $value = rgar( $entry, $field_id );
-            if ( ! empty( $value ) ) {
-                $entry_data['fields'][ $label ] = $value;
-            }
+        $entry_data = array( 'entry_id' => $entry['id'], 'date_created' => $entry['date_created'], 'source_url' => $entry['source_url'], 'fields' => array() );
+        foreach ( $fields as $fid => $label ) {
+            $val = rgar( $entry, $fid );
+            if ( ! empty( $val ) ) $entry_data['fields'][ $label ] = $val;
         }
-
         $items[] = $entry_data;
     }
 
-    return array(
-        'form'    => $form['title'],
-        'entries' => $items,
-    );
+    return array( 'form' => $form['title'], 'entries' => $items );
 }
-
-// ─── Callback: Get Bricks Content ───────────────────────────────────────────
 
 function ps_get_bricks_content_execute( $input ) {
     $post_id       = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
     $element_types = isset( $input['element_types'] ) ? (array) $input['element_types'] : array();
     $include_raw   = isset( $input['include_raw'] ) ? (bool) $input['include_raw'] : false;
 
-    if ( ! $post_id || ! get_post( $post_id ) ) {
-        return array( 'success' => false, 'error' => 'Invalid post ID.' );
-    }
+    if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
 
     $elements = ps_get_bricks_elements( $post_id );
-
     if ( empty( $elements ) ) {
-        return array(
-            'success'  => true,
-            'post_id'  => $post_id,
-            'builder'  => 'none',
-            'elements' => array(),
-            'total'    => 0,
-            'message'  => 'No Bricks content found.',
-        );
+        return array( 'success' => true, 'post_id' => $post_id, 'builder' => 'none', 'elements' => array(), 'total' => 0, 'message' => 'No Bricks content found.' );
     }
 
     $items = array();
-
     foreach ( $elements as $element ) {
         $name = isset( $element['name'] ) ? $element['name'] : '';
-
-        if ( ! empty( $element_types ) && ! in_array( $name, $element_types, true ) ) {
-            continue;
-        }
+        if ( ! empty( $element_types ) && ! in_array( $name, $element_types, true ) ) continue;
 
         $settings = isset( $element['settings'] ) ? $element['settings'] : array();
-
         $item = array(
             'element_id' => isset( $element['id'] ) ? $element['id'] : '',
             'name'       => $name,
@@ -834,283 +668,121 @@ function ps_get_bricks_content_execute( $input ) {
             'label'      => isset( $element['label'] ) ? $element['label'] : '',
         );
 
-        $common_fields = array( 'text', 'tag', 'link', 'title', 'content', 'label', 'placeholder', 'icon', '_cssClasses', 'code', 'executeCode', 'noRender' );
-        foreach ( $common_fields as $field ) {
-            if ( isset( $settings[ $field ] ) ) {
-                $item[ $field ] = $settings[ $field ];
-            }
+        foreach ( array( 'text', 'tag', 'link', 'title', 'content', 'label', 'placeholder', 'icon', '_cssClasses', 'code', 'executeCode', 'noRender' ) as $field ) {
+            if ( isset( $settings[ $field ] ) ) $item[ $field ] = $settings[ $field ];
         }
-
-        if ( $include_raw ) {
-            $item['raw_settings'] = $settings;
-        }
+        if ( $include_raw ) $item['raw_settings'] = $settings;
 
         $items[] = $item;
     }
 
-    return array(
-        'success'  => true,
-        'post_id'  => $post_id,
-        'builder'  => 'bricks',
-        'elements' => $items,
-        'total'    => count( $items ),
-    );
+    return array( 'success' => true, 'post_id' => $post_id, 'builder' => 'bricks', 'elements' => $items, 'total' => count( $items ) );
 }
-
-// ─── Callback: Update SEO Meta ──────────────────────────────────────────────
 
 function ps_update_seo_meta_execute( $input ) {
     $post_id = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
+    if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
 
-    if ( ! $post_id || ! get_post( $post_id ) ) {
-        return array( 'success' => false, 'error' => 'Invalid post ID.' );
-    }
-
-    $fields_map = array(
-        'focus_keyword'   => 'rank_math_focus_keyword',
-        'seo_title'       => 'rank_math_title',
-        'seo_description' => 'rank_math_description',
-        'canonical'       => 'rank_math_canonical_url',
-        'schema_type'     => 'rank_math_rich_snippet',
+    $map = array(
+        'focus_keyword' => 'rank_math_focus_keyword', 'seo_title' => 'rank_math_title',
+        'seo_description' => 'rank_math_description', 'canonical' => 'rank_math_canonical_url',
+        'schema_type' => 'rank_math_rich_snippet',
     );
 
     $updated = array();
-
-    foreach ( $fields_map as $input_key => $meta_key ) {
-        if ( ! empty( $input[ $input_key ] ) ) {
-            update_post_meta( $post_id, $meta_key, sanitize_text_field( $input[ $input_key ] ) );
-            $updated[] = $input_key;
+    foreach ( $map as $key => $meta_key ) {
+        if ( ! empty( $input[ $key ] ) ) {
+            update_post_meta( $post_id, $meta_key, sanitize_text_field( $input[ $key ] ) );
+            $updated[] = $key;
         }
     }
-
     if ( ! empty( $input['robots'] ) && is_array( $input['robots'] ) ) {
         update_post_meta( $post_id, 'rank_math_robots', array_map( 'sanitize_text_field', $input['robots'] ) );
         $updated[] = 'robots';
     }
 
-    return array(
-        'success' => true,
-        'post_id' => $post_id,
-        'updated' => $updated,
-        'message' => sprintf( 'Updated %d field(s) for post %d.', count( $updated ), $post_id ),
-    );
+    return array( 'success' => true, 'post_id' => $post_id, 'updated' => $updated, 'message' => sprintf( 'Updated %d field(s) for post %d.', count( $updated ), $post_id ) );
 }
-
-// ─── Callback: Update Bricks Content ────────────────────────────────────────
 
 function ps_update_bricks_content_execute( $input ) {
     $post_id = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
     $updates = isset( $input['updates'] ) ? (array) $input['updates'] : array();
     $dry_run = isset( $input['dry_run'] ) ? (bool) $input['dry_run'] : false;
 
-    if ( ! $post_id || ! get_post( $post_id ) ) {
-        return array( 'success' => false, 'error' => 'Invalid post ID.' );
-    }
-    if ( empty( $updates ) ) {
-        return array( 'success' => false, 'error' => 'No updates provided.' );
-    }
+    if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
+    if ( empty( $updates ) ) return array( 'success' => false, 'error' => 'No updates provided.' );
 
     $original_meta = get_post_meta( $post_id, '_bricks_page_content_2', true );
     $elements      = ps_get_bricks_elements( $post_id );
+    if ( empty( $elements ) ) return array( 'success' => false, 'error' => 'No Bricks content found.' );
 
-    if ( empty( $elements ) ) {
-        return array( 'success' => false, 'error' => 'No Bricks content found for this page.' );
+    $id_map = array();
+    foreach ( $elements as $i => $el ) { if ( isset( $el['id'] ) ) $id_map[ $el['id'] ] = $i; }
+
+    $changes = array(); $not_found = array(); $count = 0;
+
+    foreach ( $updates as $upd ) {
+        $eid = isset( $upd['element_id'] ) ? $upd['element_id'] : '';
+        $ns  = isset( $upd['settings'] ) ? (array) $upd['settings'] : array();
+        if ( empty( $eid ) || empty( $ns ) ) continue;
+        if ( ! isset( $id_map[ $eid ] ) ) { $not_found[] = $eid; continue; }
+
+        $idx = $id_map[ $eid ];
+        $cs  = isset( $elements[ $idx ]['settings'] ) ? $elements[ $idx ]['settings'] : array();
+        $ch  = array( 'element_id' => $eid, 'name' => $elements[ $idx ]['name'] ?? '', 'fields' => array() );
+
+        foreach ( $ns as $k => $v ) {
+            $ch['fields'][] = array( 'field' => $k, 'old' => $cs[ $k ] ?? null, 'new' => $v );
+            $elements[ $idx ]['settings'][ $k ] = ( is_array( $v ) && is_array( $cs[ $k ] ?? null ) ) ? array_merge( $cs[ $k ], $v ) : $v;
+        }
+        $changes[] = $ch; $count++;
     }
 
-    $id_to_index = array();
-    foreach ( $elements as $index => $element ) {
-        if ( isset( $element['id'] ) ) {
-            $id_to_index[ $element['id'] ] = $index;
-        }
-    }
+    if ( $dry_run ) return array( 'success' => true, 'post_id' => $post_id, 'dry_run' => true, 'changes' => $changes, 'not_found' => $not_found, 'elements_updated' => $count );
 
-    $changes          = array();
-    $not_found        = array();
-    $elements_updated = 0;
-
-    foreach ( $updates as $update ) {
-        $element_id   = isset( $update['element_id'] ) ? $update['element_id'] : '';
-        $new_settings = isset( $update['settings'] ) ? (array) $update['settings'] : array();
-
-        if ( empty( $element_id ) || empty( $new_settings ) ) {
-            continue;
-        }
-
-        if ( ! isset( $id_to_index[ $element_id ] ) ) {
-            $not_found[] = $element_id;
-            continue;
-        }
-
-        $index            = $id_to_index[ $element_id ];
-        $current_settings = isset( $elements[ $index ]['settings'] ) ? $elements[ $index ]['settings'] : array();
-
-        $change = array(
-            'element_id' => $element_id,
-            'name'       => isset( $elements[ $index ]['name'] ) ? $elements[ $index ]['name'] : '',
-            'fields'     => array(),
-        );
-
-        foreach ( $new_settings as $key => $new_value ) {
-            $old_value = isset( $current_settings[ $key ] ) ? $current_settings[ $key ] : null;
-
-            $change['fields'][] = array(
-                'field' => $key,
-                'old'   => $old_value,
-                'new'   => $new_value,
-            );
-
-            if ( is_array( $new_value ) && is_array( $old_value ) ) {
-                $elements[ $index ]['settings'][ $key ] = array_merge( $old_value, $new_value );
-            } else {
-                $elements[ $index ]['settings'][ $key ] = $new_value;
-            }
-        }
-
-        $changes[] = $change;
-        $elements_updated++;
-    }
-
-    if ( $dry_run ) {
-        return array(
-            'success'          => true,
-            'post_id'          => $post_id,
-            'dry_run'          => true,
-            'changes'          => $changes,
-            'not_found'        => $not_found,
-            'elements_updated' => $elements_updated,
-        );
-    }
-
-    $backup_key = ps_save_bricks_elements( $post_id, $elements, $original_meta );
-
-    return array(
-        'success'          => true,
-        'post_id'          => $post_id,
-        'dry_run'          => false,
-        'changes'          => $changes,
-        'not_found'        => $not_found,
-        'elements_updated' => $elements_updated,
-        'backup_key'       => $backup_key,
-        'message'          => sprintf( 'Updated %d element(s) for post %d.', $elements_updated, $post_id ),
-    );
+    $bk = ps_save_bricks_elements( $post_id, $elements, $original_meta );
+    return array( 'success' => true, 'post_id' => $post_id, 'dry_run' => false, 'changes' => $changes, 'not_found' => $not_found, 'elements_updated' => $count, 'backup_key' => $bk );
 }
 
-// ─── Callback: Add Bricks Element ───────────────────────────────────────────
+function ps_manage_page_schema_execute( $input ) {
+    $post_id = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
+    $action  = isset( $input['action'] ) ? $input['action'] : 'list';
+    $key     = isset( $input['key'] ) ? sanitize_key( $input['key'] ) : '';
+    $data    = isset( $input['data'] ) ? (array) $input['data'] : array();
 
-function ps_add_bricks_element_execute( $input ) {
-    $post_id  = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
-    $element  = isset( $input['element'] ) ? (array) $input['element'] : array();
-    $position = isset( $input['position'] ) ? $input['position'] : 'last';
-    $dry_run  = isset( $input['dry_run'] ) ? (bool) $input['dry_run'] : false;
+    if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
 
-    if ( ! $post_id || ! get_post( $post_id ) ) {
-        return array( 'success' => false, 'error' => 'Invalid post ID.' );
-    }
+    $schemas = get_post_meta( $post_id, '_ps_page_schemas', true );
+    if ( ! is_array( $schemas ) ) $schemas = array();
 
-    $name = isset( $element['name'] ) ? $element['name'] : '';
-    if ( empty( $name ) ) {
-        return array( 'success' => false, 'error' => 'Element name is required.' );
-    }
+    switch ( $action ) {
+        case 'add':
+            if ( empty( $key ) ) return array( 'success' => false, 'error' => 'Key is required.' );
+            if ( empty( $data ) || empty( $data['@type'] ) ) return array( 'success' => false, 'error' => 'Schema data with @type is required.' );
+            if ( empty( $data['@context'] ) ) $data['@context'] = 'https://schema.org';
 
-    $settings = isset( $element['settings'] ) ? (array) $element['settings'] : array();
-    if ( empty( $settings ) ) {
-        return array( 'success' => false, 'error' => 'Element settings are required.' );
-    }
+            $schemas[ $key ] = array( 'key' => $key, 'type' => $data['@type'], 'data' => $data, 'added' => gmdate( 'Y-m-d H:i:s' ) );
+            update_post_meta( $post_id, '_ps_page_schemas', $schemas );
 
-    $original_meta = get_post_meta( $post_id, '_bricks_page_content_2', true );
-    $elements      = ps_get_bricks_elements( $post_id );
+            return array( 'success' => true, 'post_id' => $post_id, 'action' => 'add', 'key' => $key, 'schema_type' => $data['@type'], 'total' => count( $schemas ), 'message' => sprintf( 'Schema "%s" (%s) added for post %d.', $key, $data['@type'], $post_id ) );
 
-    // Generate a unique ID that doesn't collide with existing ones.
-    $existing_ids = wp_list_pluck( $elements, 'id' );
-    do {
-        $new_id = ps_generate_bricks_id();
-    } while ( in_array( $new_id, $existing_ids, true ) );
+        case 'remove':
+            if ( empty( $key ) ) return array( 'success' => false, 'error' => 'Key is required.' );
+            if ( ! isset( $schemas[ $key ] ) ) return array( 'success' => false, 'error' => sprintf( 'Schema "%s" not found.', $key ) );
+            unset( $schemas[ $key ] );
+            update_post_meta( $post_id, '_ps_page_schemas', $schemas );
+            return array( 'success' => true, 'post_id' => $post_id, 'action' => 'remove', 'key' => $key, 'total' => count( $schemas ) );
 
-    // Resolve parent.
-    $parent = isset( $element['parent'] ) ? $element['parent'] : '0';
-    if ( '0' === $parent || '' === $parent ) {
-        $parent = 0;
-    }
+        case 'clear':
+            delete_post_meta( $post_id, '_ps_page_schemas' );
+            return array( 'success' => true, 'post_id' => $post_id, 'action' => 'clear', 'total' => 0 );
 
-    // Build the new element.
-    $new_element = array(
-        'id'       => $new_id,
-        'name'     => $name,
-        'parent'   => $parent,
-        'settings' => $settings,
-    );
-
-    if ( ! empty( $element['label'] ) ) {
-        $new_element['label'] = $element['label'];
-    }
-
-    // Determine insertion index.
-    $insert_index = count( $elements ); // Default: end of array.
-
-    if ( 'first' === $position ) {
-        // Find the first element with the same parent and insert before it.
-        foreach ( $elements as $i => $el ) {
-            $el_parent = isset( $el['parent'] ) ? $el['parent'] : 0;
-            if ( $el_parent === $parent ) {
-                $insert_index = $i;
-                break;
+        case 'list':
+        default:
+            $list = array();
+            foreach ( $schemas as $sk => $sv ) {
+                $list[] = array( 'key' => $sk, 'type' => $sv['type'] ?? '', 'added' => $sv['added'] ?? '' );
             }
-        }
-    } elseif ( strpos( $position, 'before:' ) === 0 ) {
-        $ref_id = substr( $position, 7 );
-        foreach ( $elements as $i => $el ) {
-            if ( isset( $el['id'] ) && $el['id'] === $ref_id ) {
-                $insert_index = $i;
-                break;
-            }
-        }
-    } elseif ( strpos( $position, 'after:' ) === 0 ) {
-        $ref_id = substr( $position, 6 );
-        foreach ( $elements as $i => $el ) {
-            if ( isset( $el['id'] ) && $el['id'] === $ref_id ) {
-                // Find the last descendant of this element to insert after the whole subtree.
-                $insert_index = $i + 1;
-                $ref_descendants = array( $ref_id );
-                for ( $j = $i + 1; $j < count( $elements ); $j++ ) {
-                    $el_parent = isset( $elements[ $j ]['parent'] ) ? $elements[ $j ]['parent'] : 0;
-                    if ( in_array( $el_parent, $ref_descendants, true ) ) {
-                        $ref_descendants[] = $elements[ $j ]['id'];
-                        $insert_index = $j + 1;
-                    }
-                }
-                break;
-            }
-        }
+            return array( 'success' => true, 'post_id' => $post_id, 'action' => 'list', 'schemas' => $list, 'total' => count( $list ) );
     }
-    // 'last' keeps the default (end of array).
-
-    if ( $dry_run ) {
-        return array(
-            'success'      => true,
-            'post_id'      => $post_id,
-            'dry_run'      => true,
-            'element_id'   => $new_id,
-            'element'      => $new_element,
-            'position'     => $insert_index,
-            'total_before' => count( $elements ),
-            'message'      => sprintf( 'Dry run: would insert "%s" element (ID: %s) at position %d.', $name, $new_id, $insert_index ),
-        );
-    }
-
-    // Insert the element at the calculated position.
-    array_splice( $elements, $insert_index, 0, array( $new_element ) );
-
-    $backup_key = ps_save_bricks_elements( $post_id, $elements, $original_meta );
-
-    return array(
-        'success'      => true,
-        'post_id'      => $post_id,
-        'dry_run'      => false,
-        'element_id'   => $new_id,
-        'element'      => $new_element,
-        'position'     => $insert_index,
-        'total_after'  => count( $elements ),
-        'backup_key'   => $backup_key,
-        'message'      => sprintf( 'Inserted "%s" element (ID: %s) at position %d for post %d.', $name, $new_id, $insert_index, $post_id ),
-    );
 }
