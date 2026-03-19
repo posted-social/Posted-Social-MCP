@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.1
+ * Version: 2.2
  * Author: Posted Social
  */
 
@@ -39,6 +39,326 @@ function ps_render_page_schema() {
     }
 }
 
+// ─── Admin Meta Box ─────────────────────────────────────────────────────────
+
+add_action( 'add_meta_boxes', 'ps_add_schema_meta_box' );
+
+function ps_add_schema_meta_box() {
+    $post_types = array( 'post', 'page' );
+    foreach ( $post_types as $pt ) {
+        add_meta_box(
+            'ps_page_schemas',
+            'Page Schemas (JSON-LD)',
+            'ps_render_schema_meta_box',
+            $pt,
+            'normal',
+            'low'
+        );
+    }
+}
+
+function ps_render_schema_meta_box( $post ) {
+    wp_nonce_field( 'ps_schema_meta_box', 'ps_schema_nonce' );
+
+    $schemas = get_post_meta( $post->ID, '_ps_page_schemas', true );
+    if ( ! is_array( $schemas ) ) {
+        $schemas = array();
+    }
+
+    ?>
+    <style>
+        .ps-schema-wrap { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .ps-schema-item { background: #f9f9f9; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 12px; padding: 0; }
+        .ps-schema-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: #fff; border-bottom: 1px solid #ddd; border-radius: 4px 4px 0 0; cursor: pointer; }
+        .ps-schema-header:hover { background: #f5f5f5; }
+        .ps-schema-title { font-weight: 600; font-size: 13px; color: #1d2327; }
+        .ps-schema-type { background: #2271b1; color: #fff; font-size: 11px; padding: 2px 8px; border-radius: 3px; margin-left: 8px; font-weight: 400; }
+        .ps-schema-date { color: #888; font-size: 11px; margin-left: auto; margin-right: 12px; }
+        .ps-schema-body { padding: 12px 14px; display: none; }
+        .ps-schema-body.ps-open { display: block; }
+        .ps-schema-textarea { width: 100%; min-height: 200px; font-family: Menlo, Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.5; padding: 10px; border: 1px solid #c3c4c7; border-radius: 3px; background: #fff; resize: vertical; tab-size: 2; }
+        .ps-schema-textarea:focus { border-color: #2271b1; box-shadow: 0 0 0 1px #2271b1; outline: none; }
+        .ps-schema-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+        .ps-schema-delete { color: #b32d2e; text-decoration: none; font-size: 12px; cursor: pointer; margin-left: auto; }
+        .ps-schema-delete:hover { color: #a00; }
+        .ps-schema-empty { color: #888; font-style: italic; padding: 16px 0; text-align: center; }
+        .ps-add-wrap { margin-top: 14px; padding-top: 14px; border-top: 1px solid #ddd; }
+        .ps-add-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .ps-add-row input { padding: 4px 8px; font-size: 13px; }
+        .ps-add-textarea { width: 100%; min-height: 120px; font-family: Menlo, Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.5; padding: 10px; border: 1px solid #c3c4c7; border-radius: 3px; resize: vertical; tab-size: 2; display: none; margin-top: 8px; }
+        .ps-toggle-arrow { font-size: 11px; color: #888; transition: transform 0.2s; }
+        .ps-toggle-arrow.ps-rotated { transform: rotate(90deg); }
+        .ps-validation-error { color: #b32d2e; font-size: 12px; margin-top: 6px; display: none; }
+        .ps-hint { color: #888; font-size: 11px; margin-top: 4px; }
+    </style>
+
+    <div class="ps-schema-wrap">
+        <?php if ( empty( $schemas ) ) : ?>
+            <div class="ps-schema-empty" id="ps-empty-msg">No schemas configured for this page. Add one below or use the MCP connector.</div>
+        <?php endif; ?>
+
+        <div id="ps-schemas-list">
+        <?php foreach ( $schemas as $key => $schema ) :
+            $type  = isset( $schema['type'] ) ? $schema['type'] : 'Unknown';
+            $added = isset( $schema['added'] ) ? $schema['added'] : '';
+            $json  = isset( $schema['data'] ) ? wp_json_encode( $schema['data'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT ) : '{}';
+        ?>
+            <div class="ps-schema-item" data-key="<?php echo esc_attr( $key ); ?>">
+                <div class="ps-schema-header" onclick="psToggleSchema(this)">
+                    <span class="ps-toggle-arrow">&#9654;</span>
+                    <span class="ps-schema-title"><?php echo esc_html( $key ); ?></span>
+                    <span class="ps-schema-type"><?php echo esc_html( $type ); ?></span>
+                    <?php if ( $added ) : ?>
+                        <span class="ps-schema-date">Added <?php echo esc_html( $added ); ?></span>
+                    <?php endif; ?>
+                </div>
+                <div class="ps-schema-body">
+                    <textarea
+                        class="ps-schema-textarea"
+                        name="ps_schemas[<?php echo esc_attr( $key ); ?>]"
+                        spellcheck="false"
+                    ><?php echo esc_textarea( $json ); ?></textarea>
+                    <div class="ps-validation-error" id="ps-err-<?php echo esc_attr( $key ); ?>"></div>
+                    <div class="ps-schema-actions">
+                        <button type="button" class="button button-small" onclick="psValidateJson(this)">Validate JSON</button>
+                        <button type="button" class="button button-small" onclick="psFormatJson(this)">Format</button>
+                        <a class="ps-schema-delete" onclick="psDeleteSchema(this)" data-key="<?php echo esc_attr( $key ); ?>">Delete</a>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
+        </div>
+
+        <input type="hidden" name="ps_schemas_deleted" id="ps-schemas-deleted" value="" />
+
+        <div class="ps-add-wrap">
+            <strong style="font-size: 13px;">Add New Schema</strong>
+            <div class="ps-add-row" style="margin-top: 8px;">
+                <label style="font-size: 12px; min-width: 30px;">Key:</label>
+                <input type="text" id="ps-new-key" placeholder="e.g. service, localbusiness, faq" style="width: 220px;" />
+                <button type="button" class="button button-small" onclick="psShowAddForm()">Add</button>
+            </div>
+            <textarea
+                class="ps-add-textarea"
+                id="ps-new-json"
+                placeholder='{"@context": "https://schema.org", "@type": "Service", "name": "..."}'
+                spellcheck="false"
+            ></textarea>
+            <div class="ps-validation-error" id="ps-add-error"></div>
+            <div id="ps-add-actions" style="display: none; margin-top: 8px;">
+                <button type="button" class="button button-primary button-small" onclick="psAddSchema()">Add Schema</button>
+                <button type="button" class="button button-small" onclick="psCancelAdd()">Cancel</button>
+            </div>
+            <div class="ps-hint">Schemas are output as JSON-LD in the &lt;head&gt; of the page. Each schema needs a unique key and valid JSON with an @type field.</div>
+        </div>
+    </div>
+
+    <script>
+    function psToggleSchema(header) {
+        var body = header.nextElementSibling;
+        var arrow = header.querySelector('.ps-toggle-arrow');
+        body.classList.toggle('ps-open');
+        arrow.classList.toggle('ps-rotated');
+    }
+
+    function psValidateJson(btn) {
+        var item = btn.closest('.ps-schema-item');
+        var textarea = item.querySelector('.ps-schema-textarea');
+        var errEl = item.querySelector('.ps-validation-error');
+        try {
+            var data = JSON.parse(textarea.value);
+            if (!data['@type']) {
+                errEl.textContent = 'Valid JSON but missing @type field.';
+                errEl.style.display = 'block';
+                errEl.style.color = '#dba617';
+                return;
+            }
+            errEl.textContent = 'Valid JSON-LD (' + data['@type'] + ')';
+            errEl.style.display = 'block';
+            errEl.style.color = '#00a32a';
+        } catch(e) {
+            errEl.textContent = 'Invalid JSON: ' + e.message;
+            errEl.style.display = 'block';
+            errEl.style.color = '#b32d2e';
+        }
+    }
+
+    function psFormatJson(btn) {
+        var item = btn.closest('.ps-schema-item');
+        var textarea = item.querySelector('.ps-schema-textarea');
+        try {
+            var data = JSON.parse(textarea.value);
+            textarea.value = JSON.stringify(data, null, 2);
+        } catch(e) {
+            // Can't format invalid JSON
+        }
+    }
+
+    function psDeleteSchema(link) {
+        var key = link.getAttribute('data-key');
+        if (!confirm('Delete the "' + key + '" schema?')) return;
+        var item = link.closest('.ps-schema-item');
+        item.remove();
+
+        var deleted = document.getElementById('ps-schemas-deleted');
+        deleted.value = deleted.value ? deleted.value + ',' + key : key;
+
+        var list = document.getElementById('ps-schemas-list');
+        if (!list.children.length) {
+            var empty = document.getElementById('ps-empty-msg');
+            if (empty) empty.style.display = 'block';
+        }
+    }
+
+    function psShowAddForm() {
+        var key = document.getElementById('ps-new-key').value.trim();
+        if (!key) { alert('Enter a schema key first.'); return; }
+        if (!/^[a-z0-9_-]+$/.test(key)) { alert('Key must be lowercase letters, numbers, hyphens, or underscores.'); return; }
+
+        // Check for duplicate
+        var existing = document.querySelector('.ps-schema-item[data-key="' + key + '"]');
+        if (existing && !confirm('A schema with key "' + key + '" already exists. Adding will replace it. Continue?')) return;
+
+        document.querySelector('.ps-add-textarea').style.display = 'block';
+        document.getElementById('ps-add-actions').style.display = 'flex';
+        document.getElementById('ps-new-json').focus();
+    }
+
+    function psAddSchema() {
+        var key = document.getElementById('ps-new-key').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+        var jsonStr = document.getElementById('ps-new-json').value.trim();
+        var errEl = document.getElementById('ps-add-error');
+
+        if (!key) { errEl.textContent = 'Key is required.'; errEl.style.display = 'block'; return; }
+        if (!jsonStr) { errEl.textContent = 'JSON data is required.'; errEl.style.display = 'block'; return; }
+
+        try {
+            var data = JSON.parse(jsonStr);
+            if (!data['@type']) { errEl.textContent = 'JSON must include an @type field.'; errEl.style.display = 'block'; return; }
+        } catch(e) {
+            errEl.textContent = 'Invalid JSON: ' + e.message; errEl.style.display = 'block'; return;
+        }
+
+        errEl.style.display = 'none';
+
+        // Remove existing item with same key
+        var existing = document.querySelector('.ps-schema-item[data-key="' + key + '"]');
+        if (existing) existing.remove();
+
+        // Remove from deleted list if it was there
+        var deleted = document.getElementById('ps-schemas-deleted');
+        if (deleted.value) {
+            var parts = deleted.value.split(',').filter(function(k) { return k !== key; });
+            deleted.value = parts.join(',');
+        }
+
+        var formatted = JSON.stringify(data, null, 2);
+        var now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        var type = data['@type'];
+
+        var html = '<div class="ps-schema-item" data-key="' + key + '">' +
+            '<div class="ps-schema-header" onclick="psToggleSchema(this)">' +
+                '<span class="ps-toggle-arrow ps-rotated">&#9654;</span>' +
+                '<span class="ps-schema-title">' + key + '</span>' +
+                '<span class="ps-schema-type">' + type + '</span>' +
+                '<span class="ps-schema-date">Added ' + now + '</span>' +
+            '</div>' +
+            '<div class="ps-schema-body ps-open">' +
+                '<textarea class="ps-schema-textarea" name="ps_schemas[' + key + ']" spellcheck="false">' +
+                    formatted.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') +
+                '</textarea>' +
+                '<div class="ps-validation-error" id="ps-err-' + key + '"></div>' +
+                '<div class="ps-schema-actions">' +
+                    '<button type="button" class="button button-small" onclick="psValidateJson(this)">Validate JSON</button>' +
+                    '<button type="button" class="button button-small" onclick="psFormatJson(this)">Format</button>' +
+                    '<a class="ps-schema-delete" onclick="psDeleteSchema(this)" data-key="' + key + '">Delete</a>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+        var list = document.getElementById('ps-schemas-list');
+        list.insertAdjacentHTML('beforeend', html);
+
+        var emptyMsg = document.getElementById('ps-empty-msg');
+        if (emptyMsg) emptyMsg.style.display = 'none';
+
+        // Reset add form
+        psCancelAdd();
+        document.getElementById('ps-new-key').value = '';
+    }
+
+    function psCancelAdd() {
+        document.querySelector('.ps-add-textarea').style.display = 'none';
+        document.getElementById('ps-add-actions').style.display = 'none';
+        document.getElementById('ps-new-json').value = '';
+        document.getElementById('ps-add-error').style.display = 'none';
+    }
+    </script>
+    <?php
+}
+
+add_action( 'save_post', 'ps_save_schema_meta_box', 10, 2 );
+
+function ps_save_schema_meta_box( $post_id, $post ) {
+    // Verify nonce.
+    if ( ! isset( $_POST['ps_schema_nonce'] ) || ! wp_verify_nonce( $_POST['ps_schema_nonce'], 'ps_schema_meta_box' ) ) {
+        return;
+    }
+
+    // Skip autosave.
+    if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+        return;
+    }
+
+    // Check permissions.
+    if ( ! current_user_can( 'edit_post', $post_id ) ) {
+        return;
+    }
+
+    $existing = get_post_meta( $post_id, '_ps_page_schemas', true );
+    if ( ! is_array( $existing ) ) {
+        $existing = array();
+    }
+
+    // Handle deletions.
+    if ( ! empty( $_POST['ps_schemas_deleted'] ) ) {
+        $deleted_keys = array_filter( explode( ',', sanitize_text_field( $_POST['ps_schemas_deleted'] ) ) );
+        foreach ( $deleted_keys as $dk ) {
+            unset( $existing[ $dk ] );
+        }
+    }
+
+    // Handle adds and updates.
+    if ( ! empty( $_POST['ps_schemas'] ) && is_array( $_POST['ps_schemas'] ) ) {
+        foreach ( $_POST['ps_schemas'] as $key => $json_str ) {
+            $key      = sanitize_key( $key );
+            $json_str = wp_unslash( $json_str );
+            $data     = json_decode( $json_str, true );
+
+            if ( ! is_array( $data ) || empty( $data['@type'] ) ) {
+                continue; // Skip invalid entries.
+            }
+
+            if ( empty( $data['@context'] ) ) {
+                $data['@context'] = 'https://schema.org';
+            }
+
+            $existing[ $key ] = array(
+                'key'   => $key,
+                'type'  => $data['@type'],
+                'data'  => $data,
+                'added' => isset( $existing[ $key ]['added'] ) ? $existing[ $key ]['added'] : gmdate( 'Y-m-d H:i:s' ),
+            );
+        }
+    }
+
+    if ( empty( $existing ) ) {
+        delete_post_meta( $post_id, '_ps_page_schemas' );
+    } else {
+        update_post_meta( $post_id, '_ps_page_schemas', $existing );
+    }
+}
+
 // ─── Category ───────────────────────────────────────────────────────────────
 
 add_action( 'wp_abilities_api_categories_init', 'ps_register_ability_category' );
@@ -59,8 +379,6 @@ add_action( 'wp_abilities_api_init', 'ps_register_abilities' );
 
 function ps_register_abilities() {
 
-    // ── READ ABILITIES ──────────────────────────────────────────────────
-
     // 1. Get content
     wp_register_ability(
         'postedsocial/get-content',
@@ -71,29 +389,14 @@ function ps_register_abilities() {
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_type' => array(
-                        'type'        => 'string',
-                        'description' => 'Post type to retrieve: post, page, or all. Default all.',
-                        'default'     => 'all',
-                    ),
-                    'per_page'  => array(
-                        'type'        => 'integer',
-                        'description' => 'Number of items to return. Default 50.',
-                        'default'     => 50,
-                    ),
-                    'search'    => array(
-                        'type'        => 'string',
-                        'description' => 'Optional search keyword to filter results.',
-                        'default'     => '',
-                    ),
+                    'post_type' => array( 'type' => 'string', 'description' => 'post, page, or all. Default all.', 'default' => 'all' ),
+                    'per_page'  => array( 'type' => 'integer', 'description' => 'Number of items. Default 50.', 'default' => 50 ),
+                    'search'    => array( 'type' => 'string', 'description' => 'Optional keyword filter.', 'default' => '' ),
                 ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
-                'properties' => array(
-                    'items' => array( 'type' => 'array' ),
-                    'total' => array( 'type' => 'integer' ),
-                ),
+                'properties' => array( 'items' => array( 'type' => 'array' ), 'total' => array( 'type' => 'integer' ) ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_get_content_execute',
@@ -107,28 +410,17 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'SEO Audit',
-            'description'         => 'Returns SEO meta for all published pages/posts: title tag, meta description, focus keyword, robots, canonical, and schema type from Rank Math.',
+            'description'         => 'Returns SEO meta for all published pages/posts with issue flags.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_type' => array(
-                        'type'        => 'string',
-                        'description' => 'Post type: post, page, or all. Default all.',
-                        'default'     => 'all',
-                    ),
-                    'per_page'  => array(
-                        'type'        => 'integer',
-                        'description' => 'Number of items. Default 100.',
-                        'default'     => 100,
-                    ),
+                    'post_type' => array( 'type' => 'string', 'description' => 'post, page, or all. Default all.', 'default' => 'all' ),
+                    'per_page'  => array( 'type' => 'integer', 'description' => 'Number of items. Default 100.', 'default' => 100 ),
                 ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
-                'properties' => array(
-                    'items' => array( 'type' => 'array' ),
-                    'total' => array( 'type' => 'integer' ),
-                ),
+                'properties' => array( 'items' => array( 'type' => 'array' ), 'total' => array( 'type' => 'integer' ) ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_seo_audit_execute',
@@ -142,17 +434,11 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Site Structure',
-            'description'         => 'Returns the page hierarchy showing parent/child relationships, URLs, and menu order.',
-            'input_schema'        => array(
-                'type'       => 'object',
-                'properties' => array(),
-            ),
+            'description'         => 'Returns the page hierarchy with parent/child relationships.',
+            'input_schema'        => array( 'type' => 'object', 'properties' => array() ),
             'output_schema'       => array(
                 'type'       => 'object',
-                'properties' => array(
-                    'pages' => array( 'type' => 'array' ),
-                    'total' => array( 'type' => 'integer' ),
-                ),
+                'properties' => array( 'pages' => array( 'type' => 'array' ), 'total' => array( 'type' => 'integer' ) ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_site_structure_execute',
@@ -166,27 +452,17 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Internal Links',
-            'description'         => 'Analyzes internal linking for a specific page or all pages. Returns outbound internal links found in content.',
+            'description'         => 'Analyzes internal linking for a specific page or all pages.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id'  => array(
-                        'type'        => 'integer',
-                        'description' => 'Specific post/page ID to analyze. Leave empty for all.',
-                        'default'     => 0,
-                    ),
-                    'per_page' => array(
-                        'type'        => 'integer',
-                        'description' => 'Number of pages to analyze if no post_id. Default 50.',
-                        'default'     => 50,
-                    ),
+                    'post_id'  => array( 'type' => 'integer', 'description' => 'Specific post/page ID, or 0 for all.', 'default' => 0 ),
+                    'per_page' => array( 'type' => 'integer', 'description' => 'Number of pages. Default 50.', 'default' => 50 ),
                 ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
-                'properties' => array(
-                    'items' => array( 'type' => 'array' ),
-                ),
+                'properties' => array( 'items' => array( 'type' => 'array' ) ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_internal_links_execute',
@@ -200,17 +476,11 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Plugins Status',
-            'description'         => 'Returns list of all installed plugins with name, version, active status, and whether updates are available.',
-            'input_schema'        => array(
-                'type'       => 'object',
-                'properties' => array(),
-            ),
+            'description'         => 'Returns installed plugins with version, active status, and updates.',
+            'input_schema'        => array( 'type' => 'object', 'properties' => array() ),
             'output_schema'       => array(
                 'type'       => 'object',
-                'properties' => array(
-                    'plugins' => array( 'type' => 'array' ),
-                    'total'   => array( 'type' => 'integer' ),
-                ),
+                'properties' => array( 'plugins' => array( 'type' => 'array' ), 'total' => array( 'type' => 'integer' ) ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_plugins_status_execute',
@@ -224,28 +494,17 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Gravity Forms Data',
-            'description'         => 'Returns list of Gravity Forms with entry counts, or recent entries for a specific form.',
+            'description'         => 'Returns Gravity Forms list or recent entries for a specific form.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'form_id'  => array(
-                        'type'        => 'integer',
-                        'description' => 'Specific form ID to get entries for. Leave empty to list all forms.',
-                        'default'     => 0,
-                    ),
-                    'per_page' => array(
-                        'type'        => 'integer',
-                        'description' => 'Number of entries to return. Default 20.',
-                        'default'     => 20,
-                    ),
+                    'form_id'  => array( 'type' => 'integer', 'description' => 'Form ID for entries, or 0 for all.', 'default' => 0 ),
+                    'per_page' => array( 'type' => 'integer', 'description' => 'Number of entries. Default 20.', 'default' => 20 ),
                 ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
-                'properties' => array(
-                    'forms'   => array( 'type' => 'array' ),
-                    'entries' => array( 'type' => 'array' ),
-                ),
+                'properties' => array( 'forms' => array( 'type' => 'array' ), 'entries' => array( 'type' => 'array' ) ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_gravity_forms_execute',
@@ -259,35 +518,22 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Get Bricks Content',
-            'description'         => 'Returns Bricks Builder elements for a page with element IDs, types, parent relationships, and settings.',
+            'description'         => 'Returns Bricks Builder elements with IDs, types, parent relationships, and settings.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id'       => array(
-                        'type'        => 'integer',
-                        'description' => 'The post/page ID to retrieve Bricks content for. Required.',
-                    ),
-                    'element_types' => array(
-                        'type'        => 'array',
-                        'description' => 'Optional filter: only return elements of these types. Leave empty for all.',
-                        'default'     => array(),
-                    ),
-                    'include_raw'   => array(
-                        'type'        => 'boolean',
-                        'description' => 'If true, includes the full raw settings object for each element. Default false.',
-                        'default'     => false,
-                    ),
+                    'post_id'       => array( 'type' => 'integer', 'description' => 'Page/post ID. Required.' ),
+                    'element_types' => array( 'type' => 'array', 'description' => 'Filter by type. Empty for all.', 'default' => array() ),
+                    'include_raw'   => array( 'type' => 'boolean', 'description' => 'Include full raw settings.', 'default' => false ),
                 ),
                 'required' => array( 'post_id' ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'success'  => array( 'type' => 'boolean' ),
-                    'post_id'  => array( 'type' => 'integer' ),
-                    'builder'  => array( 'type' => 'string' ),
-                    'elements' => array( 'type' => 'array' ),
-                    'total'    => array( 'type' => 'integer' ),
+                    'success' => array( 'type' => 'boolean' ), 'post_id' => array( 'type' => 'integer' ),
+                    'builder' => array( 'type' => 'string' ), 'elements' => array( 'type' => 'array' ),
+                    'total'   => array( 'type' => 'integer' ),
                 ),
             ),
             'permission_callback' => '__return_true',
@@ -296,33 +542,30 @@ function ps_register_abilities() {
         )
     );
 
-    // ── WRITE ABILITIES ─────────────────────────────────────────────────
-
     // 8. Update SEO meta
     wp_register_ability(
         'postedsocial/update-seo-meta',
         array(
             'category'            => 'postedsocial',
             'label'               => 'Update SEO Meta',
-            'description'         => 'Updates Rank Math SEO meta for a specific page/post: focus keyword, title, description, robots, canonical, and schema type.',
+            'description'         => 'Updates Rank Math SEO meta: title, description, focus keyword, robots, canonical, schema type.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id'         => array( 'type' => 'integer', 'description' => 'The post/page ID to update. Required.' ),
-                    'focus_keyword'   => array( 'type' => 'string', 'description' => 'Primary focus keyword.', 'default' => '' ),
-                    'seo_title'       => array( 'type' => 'string', 'description' => 'SEO title tag.', 'default' => '' ),
-                    'seo_description' => array( 'type' => 'string', 'description' => 'Meta description.', 'default' => '' ),
-                    'robots'          => array( 'type' => 'array', 'description' => 'Robots directives, e.g. ["noindex"].', 'default' => array() ),
-                    'canonical'       => array( 'type' => 'string', 'description' => 'Canonical URL.', 'default' => '' ),
-                    'schema_type'     => array( 'type' => 'string', 'description' => 'Rank Math rich snippet type.', 'default' => '' ),
+                    'post_id'         => array( 'type' => 'integer', 'description' => 'Page/post ID. Required.' ),
+                    'focus_keyword'   => array( 'type' => 'string', 'default' => '' ),
+                    'seo_title'       => array( 'type' => 'string', 'default' => '' ),
+                    'seo_description' => array( 'type' => 'string', 'default' => '' ),
+                    'robots'          => array( 'type' => 'array', 'default' => array() ),
+                    'canonical'       => array( 'type' => 'string', 'default' => '' ),
+                    'schema_type'     => array( 'type' => 'string', 'default' => '' ),
                 ),
                 'required' => array( 'post_id' ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'success' => array( 'type' => 'boolean' ),
-                    'updated' => array( 'type' => 'array' ),
+                    'success' => array( 'type' => 'boolean' ), 'updated' => array( 'type' => 'array' ),
                     'post_id' => array( 'type' => 'integer' ),
                 ),
             ),
@@ -338,34 +581,28 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Update Bricks Content',
-            'description'         => 'Updates specific Bricks Builder elements by element ID. Merges settings, preserves unspecified fields. Backs up before writing.',
+            'description'         => 'Updates existing Bricks elements by ID. Merges settings, backs up before writing.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id' => array( 'type' => 'integer', 'description' => 'The post/page ID to update. Required.' ),
+                    'post_id' => array( 'type' => 'integer', 'description' => 'Page/post ID. Required.' ),
                     'updates' => array(
-                        'type'        => 'array',
-                        'description' => 'Array of {element_id, settings} objects.',
-                        'items'       => array(
-                            'type'       => 'object',
-                            'properties' => array(
-                                'element_id' => array( 'type' => 'string' ),
-                                'settings'   => array( 'type' => 'object' ),
-                            ),
+                        'type' => 'array', 'description' => 'Array of {element_id, settings}.',
+                        'items' => array(
+                            'type' => 'object',
+                            'properties' => array( 'element_id' => array( 'type' => 'string' ), 'settings' => array( 'type' => 'object' ) ),
                             'required' => array( 'element_id', 'settings' ),
                         ),
                     ),
-                    'dry_run' => array( 'type' => 'boolean', 'description' => 'Preview without saving.', 'default' => false ),
+                    'dry_run' => array( 'type' => 'boolean', 'default' => false ),
                 ),
                 'required' => array( 'post_id', 'updates' ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'success'          => array( 'type' => 'boolean' ),
-                    'post_id'          => array( 'type' => 'integer' ),
-                    'dry_run'          => array( 'type' => 'boolean' ),
-                    'changes'          => array( 'type' => 'array' ),
+                    'success' => array( 'type' => 'boolean' ), 'post_id' => array( 'type' => 'integer' ),
+                    'dry_run' => array( 'type' => 'boolean' ), 'changes' => array( 'type' => 'array' ),
                     'elements_updated' => array( 'type' => 'integer' ),
                 ),
             ),
@@ -381,24 +618,22 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Manage Page Schema',
-            'description'         => 'Add, list, or remove JSON-LD schema blocks for a page. Schemas are stored in post meta (_ps_page_schemas) and rendered in <head> via wp_head. Supports any schema.org type. Each schema has a unique key for management.',
+            'description'         => 'Add, list, or remove JSON-LD schema blocks rendered in <head> via wp_head. Also editable in the WP admin page editor.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_id' => array( 'type' => 'integer', 'description' => 'The post/page ID. Required.' ),
-                    'action'  => array( 'type' => 'string', 'description' => '"add", "remove", "list", or "clear". Default "list".', 'default' => 'list' ),
-                    'key'     => array( 'type' => 'string', 'description' => 'Unique key for the schema. Required for "add" and "remove".', 'default' => '' ),
-                    'data'    => array( 'type' => 'object', 'description' => 'Schema.org JSON-LD data object. Required for "add". Must include @type.' ),
+                    'post_id' => array( 'type' => 'integer', 'description' => 'Page/post ID. Required.' ),
+                    'action'  => array( 'type' => 'string', 'description' => '"add", "remove", "list", or "clear".', 'default' => 'list' ),
+                    'key'     => array( 'type' => 'string', 'description' => 'Unique schema key. Required for add/remove.', 'default' => '' ),
+                    'data'    => array( 'type' => 'object', 'description' => 'Schema.org JSON-LD object. Required for add.' ),
                 ),
                 'required' => array( 'post_id' ),
             ),
             'output_schema'       => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'success' => array( 'type' => 'boolean' ),
-                    'post_id' => array( 'type' => 'integer' ),
-                    'action'  => array( 'type' => 'string' ),
-                    'schemas' => array( 'type' => 'array' ),
+                    'success' => array( 'type' => 'boolean' ), 'post_id' => array( 'type' => 'integer' ),
+                    'action'  => array( 'type' => 'string' ), 'schemas' => array( 'type' => 'array' ),
                 ),
             ),
             'permission_callback' => '__return_true',
@@ -412,9 +647,7 @@ function ps_register_abilities() {
 
 function ps_get_bricks_elements( $post_id ) {
     $meta = get_post_meta( $post_id, '_bricks_page_content_2', true );
-    if ( empty( $meta ) ) {
-        return array();
-    }
+    if ( empty( $meta ) ) return array();
     return is_string( $meta ) ? json_decode( $meta, true ) : (array) $meta;
 }
 
@@ -438,39 +671,28 @@ function ps_get_content_execute( $input ) {
     $search    = isset( $input['search'] ) ? sanitize_text_field( $input['search'] ) : '';
 
     $args = array(
-        'post_status'    => 'publish',
-        'posts_per_page' => $per_page,
-        'orderby'        => 'date',
-        'order'          => 'DESC',
-        'post_type'      => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
+        'post_status' => 'publish', 'posts_per_page' => $per_page, 'orderby' => 'date', 'order' => 'DESC',
+        'post_type'   => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
     );
-    if ( ! empty( $search ) ) {
-        $args['s'] = $search;
-    }
+    if ( ! empty( $search ) ) $args['s'] = $search;
 
     $query = new WP_Query( $args );
     $items = array();
-
     foreach ( $query->posts as $post ) {
         $content = wp_strip_all_tags( $post->post_content );
         $items[] = array(
-            'id'              => $post->ID,
-            'title'           => $post->post_title,
-            'url'             => get_permalink( $post->ID ),
-            'post_type'       => $post->post_type,
-            'date'            => get_the_date( 'Y-m-d', $post->ID ),
-            'modified'        => get_the_modified_date( 'Y-m-d', $post->ID ),
-            'word_count'      => str_word_count( $content ),
-            'content'         => $content,
-            'excerpt'         => has_excerpt( $post->ID ) ? get_the_excerpt( $post ) : wp_trim_words( $post->post_content, 40 ),
-            'seo_title'       => get_post_meta( $post->ID, 'rank_math_title', true ),
+            'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ),
+            'post_type' => $post->post_type, 'date' => get_the_date( 'Y-m-d', $post->ID ),
+            'modified' => get_the_modified_date( 'Y-m-d', $post->ID ), 'word_count' => str_word_count( $content ),
+            'content' => $content,
+            'excerpt' => has_excerpt( $post->ID ) ? get_the_excerpt( $post ) : wp_trim_words( $post->post_content, 40 ),
+            'seo_title' => get_post_meta( $post->ID, 'rank_math_title', true ),
             'seo_description' => get_post_meta( $post->ID, 'rank_math_description', true ),
-            'focus_keyword'   => get_post_meta( $post->ID, 'rank_math_focus_keyword', true ),
-            'robots'          => get_post_meta( $post->ID, 'rank_math_robots', true ),
-            'canonical'       => get_post_meta( $post->ID, 'rank_math_canonical_url', true ),
+            'focus_keyword' => get_post_meta( $post->ID, 'rank_math_focus_keyword', true ),
+            'robots' => get_post_meta( $post->ID, 'rank_math_robots', true ),
+            'canonical' => get_post_meta( $post->ID, 'rank_math_canonical_url', true ),
         );
     }
-
     return array( 'items' => $items, 'total' => $query->found_posts );
 }
 
@@ -479,11 +701,8 @@ function ps_seo_audit_execute( $input ) {
     $per_page  = isset( $input['per_page'] ) ? intval( $input['per_page'] ) : 100;
 
     $query = new WP_Query( array(
-        'post_status'    => 'publish',
-        'posts_per_page' => $per_page,
-        'orderby'        => 'menu_order',
-        'order'          => 'ASC',
-        'post_type'      => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
+        'post_status' => 'publish', 'posts_per_page' => $per_page, 'orderby' => 'menu_order', 'order' => 'ASC',
+        'post_type'   => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
     ) );
 
     $items = array();
@@ -502,50 +721,34 @@ function ps_seo_audit_execute( $input ) {
         if ( ! empty( $seo_title ) && strlen( $seo_title ) > 60 ) $issues[] = 'seo_title_too_long';
 
         $items[] = array(
-            'id'              => $post->ID,
-            'title'           => $post->post_title,
-            'url'             => get_permalink( $post->ID ),
-            'post_type'       => $post->post_type,
-            'word_count'      => str_word_count( $content ),
-            'seo_title'       => $seo_title,
-            'seo_title_len'   => strlen( $seo_title ?: '' ),
-            'seo_description' => $seo_desc,
-            'seo_desc_len'    => strlen( $seo_desc ?: '' ),
-            'focus_keyword'   => $focus_kw,
-            'robots'          => get_post_meta( $post->ID, 'rank_math_robots', true ),
-            'canonical'       => get_post_meta( $post->ID, 'rank_math_canonical_url', true ),
-            'schema_type'     => get_post_meta( $post->ID, 'rank_math_rich_snippet', true ),
-            'seo_score'       => get_post_meta( $post->ID, 'rank_math_seo_score', true ),
-            'issues'          => $issues,
+            'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ),
+            'post_type' => $post->post_type, 'word_count' => str_word_count( $content ),
+            'seo_title' => $seo_title, 'seo_title_len' => strlen( $seo_title ?: '' ),
+            'seo_description' => $seo_desc, 'seo_desc_len' => strlen( $seo_desc ?: '' ),
+            'focus_keyword' => $focus_kw,
+            'robots' => get_post_meta( $post->ID, 'rank_math_robots', true ),
+            'canonical' => get_post_meta( $post->ID, 'rank_math_canonical_url', true ),
+            'schema_type' => get_post_meta( $post->ID, 'rank_math_rich_snippet', true ),
+            'seo_score' => get_post_meta( $post->ID, 'rank_math_seo_score', true ),
+            'issues' => $issues,
         );
     }
-
     return array( 'items' => $items, 'total' => $query->found_posts );
 }
 
 function ps_site_structure_execute( $input ) {
     $pages = get_pages( array( 'sort_column' => 'menu_order, post_title', 'sort_order' => 'ASC' ) );
     $items = array();
-
     foreach ( $pages as $page ) {
-        $parent_title = '';
-        if ( $page->post_parent ) {
-            $parent = get_post( $page->post_parent );
-            $parent_title = $parent ? $parent->post_title : '';
-        }
+        $pt = $page->post_parent ? get_post( $page->post_parent ) : null;
         $items[] = array(
-            'id'           => $page->ID,
-            'title'        => $page->post_title,
-            'url'          => get_permalink( $page->ID ),
-            'slug'         => $page->post_name,
-            'parent_id'    => $page->post_parent,
-            'parent_title' => $parent_title,
-            'menu_order'   => $page->menu_order,
-            'depth'        => count( get_post_ancestors( $page->ID ) ),
-            'template'     => get_page_template_slug( $page->ID ) ?: 'default',
+            'id' => $page->ID, 'title' => $page->post_title, 'url' => get_permalink( $page->ID ),
+            'slug' => $page->post_name, 'parent_id' => $page->post_parent,
+            'parent_title' => $pt ? $pt->post_title : '', 'menu_order' => $page->menu_order,
+            'depth' => count( get_post_ancestors( $page->ID ) ),
+            'template' => get_page_template_slug( $page->ID ) ?: 'default',
         );
     }
-
     return array( 'pages' => $items, 'total' => count( $items ) );
 }
 
@@ -554,32 +757,23 @@ function ps_internal_links_execute( $input ) {
     $per_page = isset( $input['per_page'] ) ? intval( $input['per_page'] ) : 50;
     $site_url = home_url();
 
-    if ( $post_id > 0 ) {
-        $posts = array( get_post( $post_id ) );
-    } else {
-        $query = new WP_Query( array(
-            'post_status' => 'publish', 'posts_per_page' => $per_page, 'post_type' => array( 'post', 'page' ),
-        ) );
-        $posts = $query->posts;
-    }
+    $posts = $post_id > 0
+        ? array( get_post( $post_id ) )
+        : ( new WP_Query( array( 'post_status' => 'publish', 'posts_per_page' => $per_page, 'post_type' => array( 'post', 'page' ) ) ) )->posts;
 
     $items = array();
     foreach ( $posts as $post ) {
         if ( ! $post ) continue;
         $links = array();
-        if ( preg_match_all( '/<a\s[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/si', $post->post_content, $matches ) ) {
-            foreach ( $matches[1] as $i => $href ) {
+        if ( preg_match_all( '/<a\s[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)<\/a>/si', $post->post_content, $m ) ) {
+            foreach ( $m[1] as $i => $href ) {
                 if ( strpos( $href, $site_url ) === 0 || strpos( $href, '/' ) === 0 ) {
-                    $links[] = array( 'url' => $href, 'anchor_text' => wp_strip_all_tags( $matches[2][ $i ] ) );
+                    $links[] = array( 'url' => $href, 'anchor_text' => wp_strip_all_tags( $m[2][ $i ] ) );
                 }
             }
         }
-        $items[] = array(
-            'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ),
-            'internal_links' => $links, 'link_count' => count( $links ),
-        );
+        $items[] = array( 'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ), 'internal_links' => $links, 'link_count' => count( $links ) );
     }
-
     return array( 'items' => $items );
 }
 
@@ -587,95 +781,64 @@ function ps_plugins_status_execute( $input ) {
     if ( ! function_exists( 'get_plugins' ) ) require_once ABSPATH . 'wp-admin/includes/plugin.php';
     if ( ! function_exists( 'get_plugin_updates' ) ) require_once ABSPATH . 'wp-admin/includes/update.php';
 
-    $all_plugins    = get_plugins();
-    $active_plugins = get_option( 'active_plugins', array() );
-    $updates        = get_plugin_updates();
-    $items          = array();
-
-    foreach ( $all_plugins as $file => $data ) {
-        $has_update = isset( $updates[ $file ] );
-        $items[]    = array(
-            'file'             => $file,
-            'name'             => $data['Name'],
-            'version'          => $data['Version'],
-            'active'           => in_array( $file, $active_plugins, true ),
-            'update_available' => $has_update,
-            'update_version'   => $has_update ? $updates[ $file ]->update->new_version : '',
-            'author'           => $data['AuthorName'],
-        );
+    $all = get_plugins(); $active = get_option( 'active_plugins', array() ); $updates = get_plugin_updates();
+    $items = array();
+    foreach ( $all as $file => $data ) {
+        $hu = isset( $updates[ $file ] );
+        $items[] = array( 'file' => $file, 'name' => $data['Name'], 'version' => $data['Version'],
+            'active' => in_array( $file, $active, true ), 'update_available' => $hu,
+            'update_version' => $hu ? $updates[ $file ]->update->new_version : '', 'author' => $data['AuthorName'] );
     }
-
     return array( 'plugins' => $items, 'total' => count( $items ) );
 }
 
 function ps_gravity_forms_execute( $input ) {
     if ( ! class_exists( 'GFAPI' ) ) return array( 'error' => 'Gravity Forms is not active.' );
-
-    $form_id  = isset( $input['form_id'] ) ? intval( $input['form_id'] ) : 0;
+    $form_id = isset( $input['form_id'] ) ? intval( $input['form_id'] ) : 0;
     $per_page = isset( $input['per_page'] ) ? intval( $input['per_page'] ) : 20;
 
     if ( 0 === $form_id ) {
-        $forms = GFAPI::get_forms();
         $items = array();
-        foreach ( $forms as $form ) {
-            $items[] = array( 'id' => $form['id'], 'title' => $form['title'], 'entry_count' => GFAPI::count_entries( $form['id'] ), 'is_active' => (bool) $form['is_active'] );
+        foreach ( GFAPI::get_forms() as $f ) {
+            $items[] = array( 'id' => $f['id'], 'title' => $f['title'], 'entry_count' => GFAPI::count_entries( $f['id'] ), 'is_active' => (bool) $f['is_active'] );
         }
         return array( 'forms' => $items );
     }
 
     $entries = GFAPI::get_entries( $form_id, array( 'status' => 'active' ), array( 'key' => 'date_created', 'direction' => 'DESC' ), array( 'offset' => 0, 'page_size' => $per_page ) );
-    $form    = GFAPI::get_form( $form_id );
-    $fields  = array();
-    if ( $form && isset( $form['fields'] ) ) {
-        foreach ( $form['fields'] as $field ) $fields[ $field->id ] = $field->label;
-    }
+    $form = GFAPI::get_form( $form_id ); $fields = array();
+    if ( $form && isset( $form['fields'] ) ) foreach ( $form['fields'] as $f ) $fields[ $f->id ] = $f->label;
 
     $items = array();
-    foreach ( $entries as $entry ) {
-        $entry_data = array( 'entry_id' => $entry['id'], 'date_created' => $entry['date_created'], 'source_url' => $entry['source_url'], 'fields' => array() );
-        foreach ( $fields as $fid => $label ) {
-            $val = rgar( $entry, $fid );
-            if ( ! empty( $val ) ) $entry_data['fields'][ $label ] = $val;
-        }
-        $items[] = $entry_data;
+    foreach ( $entries as $e ) {
+        $ed = array( 'entry_id' => $e['id'], 'date_created' => $e['date_created'], 'source_url' => $e['source_url'], 'fields' => array() );
+        foreach ( $fields as $fid => $label ) { $v = rgar( $e, $fid ); if ( ! empty( $v ) ) $ed['fields'][ $label ] = $v; }
+        $items[] = $ed;
     }
-
     return array( 'form' => $form['title'], 'entries' => $items );
 }
 
 function ps_get_bricks_content_execute( $input ) {
-    $post_id       = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
-    $element_types = isset( $input['element_types'] ) ? (array) $input['element_types'] : array();
-    $include_raw   = isset( $input['include_raw'] ) ? (bool) $input['include_raw'] : false;
+    $post_id = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
+    $types   = isset( $input['element_types'] ) ? (array) $input['element_types'] : array();
+    $raw     = isset( $input['include_raw'] ) ? (bool) $input['include_raw'] : false;
 
     if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
-
     $elements = ps_get_bricks_elements( $post_id );
-    if ( empty( $elements ) ) {
-        return array( 'success' => true, 'post_id' => $post_id, 'builder' => 'none', 'elements' => array(), 'total' => 0, 'message' => 'No Bricks content found.' );
-    }
+    if ( empty( $elements ) ) return array( 'success' => true, 'post_id' => $post_id, 'builder' => 'none', 'elements' => array(), 'total' => 0 );
 
     $items = array();
-    foreach ( $elements as $element ) {
-        $name = isset( $element['name'] ) ? $element['name'] : '';
-        if ( ! empty( $element_types ) && ! in_array( $name, $element_types, true ) ) continue;
-
-        $settings = isset( $element['settings'] ) ? $element['settings'] : array();
-        $item = array(
-            'element_id' => isset( $element['id'] ) ? $element['id'] : '',
-            'name'       => $name,
-            'parent'     => isset( $element['parent'] ) ? $element['parent'] : 0,
-            'label'      => isset( $element['label'] ) ? $element['label'] : '',
-        );
-
-        foreach ( array( 'text', 'tag', 'link', 'title', 'content', 'label', 'placeholder', 'icon', '_cssClasses', 'code', 'executeCode', 'noRender' ) as $field ) {
-            if ( isset( $settings[ $field ] ) ) $item[ $field ] = $settings[ $field ];
+    foreach ( $elements as $el ) {
+        $name = $el['name'] ?? '';
+        if ( ! empty( $types ) && ! in_array( $name, $types, true ) ) continue;
+        $s = $el['settings'] ?? array();
+        $item = array( 'element_id' => $el['id'] ?? '', 'name' => $name, 'parent' => $el['parent'] ?? 0, 'label' => $el['label'] ?? '' );
+        foreach ( array( 'text', 'tag', 'link', 'title', 'content', 'label', 'placeholder', 'icon', '_cssClasses', 'code', 'executeCode', 'noRender' ) as $f ) {
+            if ( isset( $s[ $f ] ) ) $item[ $f ] = $s[ $f ];
         }
-        if ( $include_raw ) $item['raw_settings'] = $settings;
-
+        if ( $raw ) $item['raw_settings'] = $s;
         $items[] = $item;
     }
-
     return array( 'success' => true, 'post_id' => $post_id, 'builder' => 'bricks', 'elements' => $items, 'total' => count( $items ) );
 }
 
@@ -683,24 +846,15 @@ function ps_update_seo_meta_execute( $input ) {
     $post_id = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
     if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
 
-    $map = array(
-        'focus_keyword' => 'rank_math_focus_keyword', 'seo_title' => 'rank_math_title',
-        'seo_description' => 'rank_math_description', 'canonical' => 'rank_math_canonical_url',
-        'schema_type' => 'rank_math_rich_snippet',
-    );
-
+    $map = array( 'focus_keyword' => 'rank_math_focus_keyword', 'seo_title' => 'rank_math_title',
+        'seo_description' => 'rank_math_description', 'canonical' => 'rank_math_canonical_url', 'schema_type' => 'rank_math_rich_snippet' );
     $updated = array();
-    foreach ( $map as $key => $meta_key ) {
-        if ( ! empty( $input[ $key ] ) ) {
-            update_post_meta( $post_id, $meta_key, sanitize_text_field( $input[ $key ] ) );
-            $updated[] = $key;
-        }
+    foreach ( $map as $k => $mk ) {
+        if ( ! empty( $input[ $k ] ) ) { update_post_meta( $post_id, $mk, sanitize_text_field( $input[ $k ] ) ); $updated[] = $k; }
     }
     if ( ! empty( $input['robots'] ) && is_array( $input['robots'] ) ) {
-        update_post_meta( $post_id, 'rank_math_robots', array_map( 'sanitize_text_field', $input['robots'] ) );
-        $updated[] = 'robots';
+        update_post_meta( $post_id, 'rank_math_robots', array_map( 'sanitize_text_field', $input['robots'] ) ); $updated[] = 'robots';
     }
-
     return array( 'success' => true, 'post_id' => $post_id, 'updated' => $updated, 'message' => sprintf( 'Updated %d field(s) for post %d.', count( $updated ), $post_id ) );
 }
 
@@ -712,36 +866,29 @@ function ps_update_bricks_content_execute( $input ) {
     if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
     if ( empty( $updates ) ) return array( 'success' => false, 'error' => 'No updates provided.' );
 
-    $original_meta = get_post_meta( $post_id, '_bricks_page_content_2', true );
-    $elements      = ps_get_bricks_elements( $post_id );
+    $orig = get_post_meta( $post_id, '_bricks_page_content_2', true );
+    $elements = ps_get_bricks_elements( $post_id );
     if ( empty( $elements ) ) return array( 'success' => false, 'error' => 'No Bricks content found.' );
 
-    $id_map = array();
-    foreach ( $elements as $i => $el ) { if ( isset( $el['id'] ) ) $id_map[ $el['id'] ] = $i; }
+    $map = array(); foreach ( $elements as $i => $e ) { if ( isset( $e['id'] ) ) $map[ $e['id'] ] = $i; }
+    $changes = array(); $nf = array(); $cnt = 0;
 
-    $changes = array(); $not_found = array(); $count = 0;
-
-    foreach ( $updates as $upd ) {
-        $eid = isset( $upd['element_id'] ) ? $upd['element_id'] : '';
-        $ns  = isset( $upd['settings'] ) ? (array) $upd['settings'] : array();
+    foreach ( $updates as $u ) {
+        $eid = $u['element_id'] ?? ''; $ns = (array) ( $u['settings'] ?? array() );
         if ( empty( $eid ) || empty( $ns ) ) continue;
-        if ( ! isset( $id_map[ $eid ] ) ) { $not_found[] = $eid; continue; }
-
-        $idx = $id_map[ $eid ];
-        $cs  = isset( $elements[ $idx ]['settings'] ) ? $elements[ $idx ]['settings'] : array();
-        $ch  = array( 'element_id' => $eid, 'name' => $elements[ $idx ]['name'] ?? '', 'fields' => array() );
-
+        if ( ! isset( $map[ $eid ] ) ) { $nf[] = $eid; continue; }
+        $idx = $map[ $eid ]; $cs = $elements[ $idx ]['settings'] ?? array();
+        $ch = array( 'element_id' => $eid, 'name' => $elements[ $idx ]['name'] ?? '', 'fields' => array() );
         foreach ( $ns as $k => $v ) {
             $ch['fields'][] = array( 'field' => $k, 'old' => $cs[ $k ] ?? null, 'new' => $v );
             $elements[ $idx ]['settings'][ $k ] = ( is_array( $v ) && is_array( $cs[ $k ] ?? null ) ) ? array_merge( $cs[ $k ], $v ) : $v;
         }
-        $changes[] = $ch; $count++;
+        $changes[] = $ch; $cnt++;
     }
 
-    if ( $dry_run ) return array( 'success' => true, 'post_id' => $post_id, 'dry_run' => true, 'changes' => $changes, 'not_found' => $not_found, 'elements_updated' => $count );
-
-    $bk = ps_save_bricks_elements( $post_id, $elements, $original_meta );
-    return array( 'success' => true, 'post_id' => $post_id, 'dry_run' => false, 'changes' => $changes, 'not_found' => $not_found, 'elements_updated' => $count, 'backup_key' => $bk );
+    if ( $dry_run ) return array( 'success' => true, 'post_id' => $post_id, 'dry_run' => true, 'changes' => $changes, 'not_found' => $nf, 'elements_updated' => $cnt );
+    $bk = ps_save_bricks_elements( $post_id, $elements, $orig );
+    return array( 'success' => true, 'post_id' => $post_id, 'dry_run' => false, 'changes' => $changes, 'not_found' => $nf, 'elements_updated' => $cnt, 'backup_key' => $bk );
 }
 
 function ps_manage_page_schema_execute( $input ) {
@@ -751,7 +898,6 @@ function ps_manage_page_schema_execute( $input ) {
     $data    = isset( $input['data'] ) ? (array) $input['data'] : array();
 
     if ( ! $post_id || ! get_post( $post_id ) ) return array( 'success' => false, 'error' => 'Invalid post ID.' );
-
     $schemas = get_post_meta( $post_id, '_ps_page_schemas', true );
     if ( ! is_array( $schemas ) ) $schemas = array();
 
@@ -760,11 +906,9 @@ function ps_manage_page_schema_execute( $input ) {
             if ( empty( $key ) ) return array( 'success' => false, 'error' => 'Key is required.' );
             if ( empty( $data ) || empty( $data['@type'] ) ) return array( 'success' => false, 'error' => 'Schema data with @type is required.' );
             if ( empty( $data['@context'] ) ) $data['@context'] = 'https://schema.org';
-
             $schemas[ $key ] = array( 'key' => $key, 'type' => $data['@type'], 'data' => $data, 'added' => gmdate( 'Y-m-d H:i:s' ) );
             update_post_meta( $post_id, '_ps_page_schemas', $schemas );
-
-            return array( 'success' => true, 'post_id' => $post_id, 'action' => 'add', 'key' => $key, 'schema_type' => $data['@type'], 'total' => count( $schemas ), 'message' => sprintf( 'Schema "%s" (%s) added for post %d.', $key, $data['@type'], $post_id ) );
+            return array( 'success' => true, 'post_id' => $post_id, 'action' => 'add', 'key' => $key, 'schema_type' => $data['@type'], 'total' => count( $schemas ) );
 
         case 'remove':
             if ( empty( $key ) ) return array( 'success' => false, 'error' => 'Key is required.' );
@@ -777,12 +921,9 @@ function ps_manage_page_schema_execute( $input ) {
             delete_post_meta( $post_id, '_ps_page_schemas' );
             return array( 'success' => true, 'post_id' => $post_id, 'action' => 'clear', 'total' => 0 );
 
-        case 'list':
-        default:
+        case 'list': default:
             $list = array();
-            foreach ( $schemas as $sk => $sv ) {
-                $list[] = array( 'key' => $sk, 'type' => $sv['type'] ?? '', 'added' => $sv['added'] ?? '' );
-            }
+            foreach ( $schemas as $sk => $sv ) $list[] = array( 'key' => $sk, 'type' => $sv['type'] ?? '', 'added' => $sv['added'] ?? '' );
             return array( 'success' => true, 'post_id' => $post_id, 'action' => 'list', 'schemas' => $list, 'total' => count( $list ) );
     }
 }

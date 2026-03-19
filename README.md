@@ -1,9 +1,9 @@
 # Posted Social MCP Abilities
 
-**Version:** 2.1
+**Version:** 2.2
 **Requires:** WordPress 6.0+, WP Abilities API, Bricks Builder (for Bricks abilities), Rank Math SEO (for SEO abilities)
 
-WordPress plugin that exposes site content, SEO data, page structure, and Bricks Builder content to AI assistants via the MCP (Model Context Protocol) adapter.
+WordPress plugin that exposes site content, SEO data, page structure, and Bricks Builder content to AI assistants via the MCP (Model Context Protocol) adapter. Includes a visual admin meta box for managing JSON-LD schema directly in the WordPress editor.
 
 ---
 
@@ -24,11 +24,35 @@ WordPress plugin that exposes site content, SEO data, page structure, and Bricks
 
 ---
 
+## Admin Meta Box
+
+v2.2 adds a **"Page Schemas (JSON-LD)"** meta box to the page and post editor in WP admin. This provides a visual interface for the same schema data managed by the `manage-page-schema` MCP ability.
+
+### Features
+
+- Collapsible accordion per schema showing key name and @type badge
+- Editable JSON textarea with monospace font for each schema
+- **Validate JSON** button with inline feedback (checks for valid JSON and @type field)
+- **Format** button to pretty-print JSON
+- **Delete** per schema with confirmation dialog
+- **Add New Schema** form with key input and JSON textarea
+- Client-side validation before adding (checks key format, valid JSON, @type present)
+- Duplicate key detection with replace confirmation
+- Saves on normal WordPress Update/Publish
+
+### Where to find it
+
+Edit any page or post in WP admin. Scroll below the main content area to find the "Page Schemas (JSON-LD)" meta box. If you don't see it, check Screen Options at the top of the editor and make sure it's enabled.
+
+### Data storage
+
+Both the admin meta box and the MCP ability read and write to the same `_ps_page_schemas` post meta field. Changes made in either place are immediately reflected in the other.
+
+---
+
 ## Ability Reference
 
 ### 1. Get Site Content
-
-Returns published pages and posts with their full text content and Rank Math SEO meta.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -36,11 +60,7 @@ Returns published pages and posts with their full text content and Rank Math SEO
 | `per_page` | integer | `50` | Number of items to return |
 | `search` | string | `""` | Optional keyword filter |
 
----
-
 ### 2. SEO Audit
-
-Returns SEO meta for all published content with automated issue detection.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -49,45 +69,31 @@ Returns SEO meta for all published content with automated issue detection.
 
 **Issue flags:** `missing_seo_title`, `missing_meta_description`, `missing_focus_keyword`, `thin_content`, `meta_description_too_long`, `seo_title_too_long`.
 
----
-
 ### 3. Site Structure
 
-Returns the page hierarchy showing parent/child relationships. No parameters.
-
----
+No parameters. Returns page hierarchy with parent/child relationships, slugs, menu order, depth, and template.
 
 ### 4. Internal Links
-
-Scans `post_content` for internal anchor tags. Note: links rendered by Bricks Builder are not detected.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `post_id` | integer | `0` | Specific page ID, or `0` for all |
 | `per_page` | integer | `50` | Number of pages to analyze |
 
----
+**Note:** Scans `post_content` only. Links rendered by Bricks Builder are not detected.
 
 ### 5. Plugins Status
 
-Returns all installed plugins with their current state. No parameters.
-
----
+No parameters. Returns all installed plugins with version, active status, update availability.
 
 ### 6. Gravity Forms Data
 
-Lists forms or retrieves entries. Requires Gravity Forms to be active.
-
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `form_id` | integer | `0` | Specific form ID for entries, or `0` to list all |
+| `form_id` | integer | `0` | Form ID for entries, or `0` to list all |
 | `per_page` | integer | `20` | Number of entries to return |
 
----
-
 ### 7. Get Bricks Content
-
-Reads Bricks Builder elements from `_bricks_page_content_2` post meta.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -95,11 +101,7 @@ Reads Bricks Builder elements from `_bricks_page_content_2` post meta.
 | `element_types` | array | `[]` | Filter by element type |
 | `include_raw` | boolean | `false` | Include full raw settings |
 
----
-
 ### 8. Update SEO Meta
-
-Updates Rank Math SEO fields for a specific page or post.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -122,11 +124,7 @@ Updates Rank Math SEO fields for a specific page or post.
 | `canonical` | `rank_math_canonical_url` |
 | `schema_type` | `rank_math_rich_snippet` |
 
----
-
 ### 9. Update Bricks Content
-
-Modifies existing Bricks elements by element ID. Settings are merged.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -134,13 +132,7 @@ Modifies existing Bricks elements by element ID. Settings are merged.
 | `updates` | array | *required* | Array of `{element_id, settings}` objects |
 | `dry_run` | boolean | `false` | Preview changes without saving |
 
----
-
 ### 10. Manage Page Schema
-
-Add, list, or remove JSON-LD schema blocks for any page. Schemas are stored in the `_ps_page_schemas` post meta field and rendered in the document `<head>` via a `wp_head` hook. This approach bypasses Bricks Builder entirely and works reliably with any theme or page builder.
-
-Each schema is identified by a unique key (e.g., "service", "localbusiness") so individual schemas can be added, replaced, or removed without affecting others on the same page.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -160,12 +152,12 @@ Each schema is identified by a unique key (e.g., "service", "localbusiness") so 
 
 **How it works:**
 
-1. Schema data is stored as a serialized array in `_ps_page_schemas` post meta
-2. On every page load, the `wp_head` hook checks for stored schemas
-3. Each schema is output as a `<script type="application/ld+json">` block in the `<head>`
-4. The `@context` field is auto-added if not provided
+1. Schema data is stored in `_ps_page_schemas` post meta
+2. On page load, the `wp_head` hook outputs each schema as `<script type="application/ld+json">` in the `<head>`
+3. The `@context` field is auto-added if not provided
+4. Same data is viewable and editable in the admin meta box
 
-**Example: Add Service schema to a page**
+**Example: Add Service schema**
 
 ```json
 {
@@ -190,37 +182,9 @@ Each schema is identified by a unique key (e.g., "service", "localbusiness") so 
       "telephone": "+1-636-939-5905",
       "url": "https://wescoworks.com"
     },
-    "areaServed": {
-      "@type": "GeoCircle",
-      "geoMidpoint": {
-        "@type": "GeoCoordinates",
-        "latitude": 38.6631,
-        "longitude": -90.6879
-      },
-      "geoRadius": "80467"
-    },
     "serviceType": "Precision Milling",
     "url": "https://wescoworks.com/capabilities/milling/"
   }
-}
-```
-
-**Example: List schemas for a page**
-
-```json
-{
-  "post_id": 20,
-  "action": "list"
-}
-```
-
-**Example: Remove a schema**
-
-```json
-{
-  "post_id": 20,
-  "action": "remove",
-  "key": "service"
 }
 ```
 
@@ -229,10 +193,12 @@ Each schema is identified by a unique key (e.g., "service", "localbusiness") so 
 ## Safety Features
 
 - **Bricks backup on write:** Every Bricks content modification saves a timestamped backup
-- **Dry run mode:** `update-bricks-content` supports `dry_run: true` for previewing changes
-- **Cache clearing:** Bricks render cache and WP object cache are cleared after writes
-- **Input sanitization:** SEO meta values are passed through `sanitize_text_field`
-- **Schema keys:** `sanitize_key` is applied to all schema keys
+- **Dry run mode:** `update-bricks-content` supports `dry_run: true`
+- **Cache clearing:** Bricks render cache and WP object cache cleared after writes
+- **Input sanitization:** SEO meta via `sanitize_text_field`, schema keys via `sanitize_key`
+- **Nonce verification:** Admin meta box uses WordPress nonce for CSRF protection
+- **Permission check:** Meta box save checks `edit_post` capability
+- **Autosave skip:** Meta box save skipped during WordPress autosave
 
 ---
 
@@ -250,11 +216,16 @@ Each schema is identified by a unique key (e.g., "service", "localbusiness") so 
 
 ## Changelog
 
+### 2.2
+- Added admin meta box "Page Schemas (JSON-LD)" to page and post editors
+- Visual UI for viewing, editing, adding, and deleting schemas without MCP
+- JSON validation and formatting buttons
+- Nonce verification, capability checks, and autosave handling on save
+
 ### 2.1
-- **Replaced** `add-bricks-element` with `manage-page-schema` — Bricks strips code elements added outside its editor, so schema is now stored in its own post meta field and rendered via `wp_head`
-- Added `wp_head` hook (`ps_render_page_schema`) that outputs JSON-LD from `_ps_page_schemas` post meta
-- Schema management supports add, remove, list, and clear actions with unique keys per schema
-- Removed `add-bricks-element` ability (Bricks Builder overwrites elements added via `update_post_meta`)
+- Replaced `add-bricks-element` with `manage-page-schema`
+- Schema stored in `_ps_page_schemas` post meta, rendered via `wp_head`
+- Supports add, remove, list, and clear actions with unique keys
 
 ### 2.0
 - Added Bricks read/write abilities and `update-seo-meta`
