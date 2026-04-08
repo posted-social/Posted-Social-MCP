@@ -1,235 +1,219 @@
 # Posted Social MCP Abilities
 
-**Version:** 2.2
-**Requires:** WordPress 6.0+, WP Abilities API, Bricks Builder (for Bricks abilities), Rank Math SEO (for SEO abilities)
+**Version:** 2.3  
+**Author:** Posted Social  
+**Requires:** WordPress with WP Abilities API
 
-WordPress plugin that exposes site content, SEO data, page structure, and Bricks Builder content to AI assistants via the MCP (Model Context Protocol) adapter. Includes a visual admin meta box for managing JSON-LD schema directly in the WordPress editor.
-
----
-
-## Abilities Overview
-
-| # | Ability | Type | Description |
-|---|---------|------|-------------|
-| 1 | `postedsocial/get-content` | Read | Pages/posts with full content and SEO meta |
-| 2 | `postedsocial/seo-audit` | Read | SEO meta for all content with issue flags |
-| 3 | `postedsocial/site-structure` | Read | Page hierarchy with parent/child relationships |
-| 4 | `postedsocial/internal-links` | Read | Outbound internal links in post content |
-| 5 | `postedsocial/plugins-status` | Read | Installed plugins with versions and update status |
-| 6 | `postedsocial/gravity-forms` | Read | Forms list and recent entries |
-| 7 | `postedsocial/get-bricks-content` | Read | Bricks Builder elements with IDs, types, and settings |
-| 8 | `postedsocial/update-seo-meta` | Write | Update Rank Math title, description, keywords, robots, canonical |
-| 9 | `postedsocial/update-bricks-content` | Write | Modify existing Bricks elements by ID |
-| 10 | `postedsocial/manage-page-schema` | Write | Add/remove/list JSON-LD schema blocks rendered via wp_head |
+Exposes WordPress site content, SEO data, structure, Bricks Builder content, and media library management to AI assistants via the Model Context Protocol (MCP).
 
 ---
 
-## Admin Meta Box
+## Overview
 
-v2.2 adds a **"Page Schemas (JSON-LD)"** meta box to the page and post editor in WP admin. This provides a visual interface for the same schema data managed by the `manage-page-schema` MCP ability.
+This plugin registers a set of MCP abilities that allow AI assistants (like Claude) to read and update your WordPress site directly — auditing SEO, updating meta, managing schema, analyzing content structure, and now writing image alt text by visually inspecting each image.
 
-### Features
-
-- Collapsible accordion per schema showing key name and @type badge
-- Editable JSON textarea with monospace font for each schema
-- **Validate JSON** button with inline feedback (checks for valid JSON and @type field)
-- **Format** button to pretty-print JSON
-- **Delete** per schema with confirmation dialog
-- **Add New Schema** form with key input and JSON textarea
-- Client-side validation before adding (checks key format, valid JSON, @type present)
-- Duplicate key detection with replace confirmation
-- Saves on normal WordPress Update/Publish
-
-### Where to find it
-
-Edit any page or post in WP admin. Scroll below the main content area to find the "Page Schemas (JSON-LD)" meta box. If you don't see it, check Screen Options at the top of the editor and make sure it's enabled.
-
-### Data storage
-
-Both the admin meta box and the MCP ability read and write to the same `_ps_page_schemas` post meta field. Changes made in either place are immediately reflected in the other.
+All abilities are registered under the `postedsocial` category.
 
 ---
 
-## Ability Reference
+## Abilities
 
-### 1. Get Site Content
+### 1. `postedsocial/get-content`
+Returns published pages and posts with full content, SEO meta (Rank Math), URL, date, and word count.
 
+**Input**
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+|---|---|---|---|
 | `post_type` | string | `all` | `post`, `page`, or `all` |
 | `per_page` | integer | `50` | Number of items to return |
 | `search` | string | `""` | Optional keyword filter |
 
-### 2. SEO Audit
+**Output:** `{ items: [], total: int }`
 
+---
+
+### 2. `postedsocial/seo-audit`
+Returns SEO meta for all published pages/posts with issue flags. Flags include: `missing_seo_title`, `missing_meta_description`, `missing_focus_keyword`, `thin_content`, `meta_description_too_long`, `seo_title_too_long`.
+
+**Input**
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+|---|---|---|---|
 | `post_type` | string | `all` | `post`, `page`, or `all` |
 | `per_page` | integer | `100` | Number of items to return |
 
-**Issue flags:** `missing_seo_title`, `missing_meta_description`, `missing_focus_keyword`, `thin_content`, `meta_description_too_long`, `seo_title_too_long`.
+**Output:** `{ items: [], total: int }`
 
-### 3. Site Structure
+---
 
-No parameters. Returns page hierarchy with parent/child relationships, slugs, menu order, depth, and template.
+### 3. `postedsocial/site-structure`
+Returns the full page hierarchy with parent/child relationships, menu order, depth, and page template.
 
-### 4. Internal Links
+**Input:** None
 
+**Output:** `{ pages: [], total: int }`
+
+---
+
+### 4. `postedsocial/internal-links`
+Analyzes internal linking for a specific page or all pages. Returns each page's outbound internal links with anchor text.
+
+**Input**
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post_id` | integer | `0` | Specific page ID, or `0` for all |
+|---|---|---|---|
+| `post_id` | integer | `0` | Specific post/page ID, or `0` for all |
 | `per_page` | integer | `50` | Number of pages to analyze |
 
-**Note:** Scans `post_content` only. Links rendered by Bricks Builder are not detected.
+**Output:** `{ items: [] }`
 
-### 5. Plugins Status
+---
 
-No parameters. Returns all installed plugins with version, active status, update availability.
+### 5. `postedsocial/plugins-status`
+Returns all installed plugins with version, active status, and whether an update is available.
 
-### 6. Gravity Forms Data
+**Input:** None
 
+**Output:** `{ plugins: [], total: int }`
+
+---
+
+### 6. `postedsocial/gravity-forms`
+Returns Gravity Forms list or recent entries for a specific form.
+
+**Input**
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `form_id` | integer | `0` | Form ID for entries, or `0` to list all |
+|---|---|---|---|
+| `form_id` | integer | `0` | Form ID for entries, or `0` for all forms |
 | `per_page` | integer | `20` | Number of entries to return |
 
-### 7. Get Bricks Content
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post_id` | integer | *required* | Page/post ID |
-| `element_types` | array | `[]` | Filter by element type |
-| `include_raw` | boolean | `false` | Include full raw settings |
-
-### 8. Update SEO Meta
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post_id` | integer | *required* | Page/post ID |
-| `seo_title` | string | `""` | Title tag |
-| `seo_description` | string | `""` | Meta description |
-| `focus_keyword` | string | `""` | Primary focus keyword |
-| `robots` | array | `[]` | e.g., `["noindex"]` |
-| `canonical` | string | `""` | Canonical URL |
-| `schema_type` | string | `""` | Rich snippet type |
-
-**Meta key mapping:**
-
-| Parameter | Rank Math Meta Key |
-|-----------|--------------------|
-| `seo_title` | `rank_math_title` |
-| `seo_description` | `rank_math_description` |
-| `focus_keyword` | `rank_math_focus_keyword` |
-| `robots` | `rank_math_robots` |
-| `canonical` | `rank_math_canonical_url` |
-| `schema_type` | `rank_math_rich_snippet` |
-
-### 9. Update Bricks Content
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post_id` | integer | *required* | Page/post ID |
-| `updates` | array | *required* | Array of `{element_id, settings}` objects |
-| `dry_run` | boolean | `false` | Preview changes without saving |
-
-### 10. Manage Page Schema
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `post_id` | integer | *required* | Page/post ID |
-| `action` | string | `"list"` | `"add"`, `"remove"`, `"list"`, or `"clear"` |
-| `key` | string | `""` | Unique schema key. Required for `add` and `remove` |
-| `data` | object | — | Schema.org JSON-LD object. Required for `add`. Must include `@type` |
-
-**Actions:**
-
-| Action | Description |
-|--------|-------------|
-| `add` | Adds or replaces a schema by key. Requires `key` and `data`. |
-| `remove` | Removes a schema by key. Requires `key`. |
-| `list` | Lists all schemas for the page with keys, types, and timestamps. |
-| `clear` | Removes all schemas for the page. |
-
-**How it works:**
-
-1. Schema data is stored in `_ps_page_schemas` post meta
-2. On page load, the `wp_head` hook outputs each schema as `<script type="application/ld+json">` in the `<head>`
-3. The `@context` field is auto-added if not provided
-4. Same data is viewable and editable in the admin meta box
-
-**Example: Add Service schema**
-
-```json
-{
-  "post_id": 20,
-  "action": "add",
-  "key": "service",
-  "data": {
-    "@type": "Service",
-    "name": "Precision Milling Services",
-    "description": "CNC and manual milling for heavy equipment parts.",
-    "provider": {
-      "@type": "LocalBusiness",
-      "name": "Wesco Machine Works",
-      "address": {
-        "@type": "PostalAddress",
-        "streetAddress": "851 Westwood Industrial Park Drive",
-        "addressLocality": "Weldon Spring",
-        "addressRegion": "MO",
-        "postalCode": "63304",
-        "addressCountry": "US"
-      },
-      "telephone": "+1-636-939-5905",
-      "url": "https://wescoworks.com"
-    },
-    "serviceType": "Precision Milling",
-    "url": "https://wescoworks.com/capabilities/milling/"
-  }
-}
-```
+**Output:** `{ forms: [] }` or `{ form: string, entries: [] }`
 
 ---
 
-## Safety Features
+### 7. `postedsocial/get-bricks-content`
+Returns Bricks Builder elements with IDs, types, parent relationships, and settings for a specific page.
 
-- **Bricks backup on write:** Every Bricks content modification saves a timestamped backup
-- **Dry run mode:** `update-bricks-content` supports `dry_run: true`
-- **Cache clearing:** Bricks render cache and WP object cache cleared after writes
-- **Input sanitization:** SEO meta via `sanitize_text_field`, schema keys via `sanitize_key`
-- **Nonce verification:** Admin meta box uses WordPress nonce for CSRF protection
-- **Permission check:** Meta box save checks `edit_post` capability
-- **Autosave skip:** Meta box save skipped during WordPress autosave
+**Input**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `post_id` | integer | — | Page/post ID. **Required.** |
+| `element_types` | array | `[]` | Filter by element type. Empty returns all. |
+| `include_raw` | boolean | `false` | Include full raw settings object |
+
+**Output:** `{ success: bool, post_id: int, builder: string, elements: [], total: int }`
 
 ---
 
-## Dependencies
+### 8. `postedsocial/update-seo-meta`
+Updates Rank Math SEO meta fields for a page or post: title, description, focus keyword, robots, canonical URL, and schema type.
 
-| Dependency | Required For | Status |
-|------------|-------------|--------|
-| WP Abilities API | All abilities | Required |
-| MCP Adapter | MCP protocol access | Required |
-| Rank Math SEO | SEO abilities | Optional |
-| Bricks Builder | Bricks abilities | Optional |
-| Gravity Forms | `gravity-forms` | Optional |
+**Input**
+| Parameter | Type | Description |
+|---|---|---|
+| `post_id` | integer | Page/post ID. **Required.** |
+| `seo_title` | string | Rank Math SEO title |
+| `seo_description` | string | Rank Math meta description |
+| `focus_keyword` | string | Rank Math focus keyword |
+| `robots` | array | Robots directives e.g. `["index", "follow"]` |
+| `canonical` | string | Canonical URL override |
+| `schema_type` | string | Rank Math rich snippet type |
+
+**Output:** `{ success: bool, post_id: int, updated: [], message: string }`
+
+---
+
+### 9. `postedsocial/update-bricks-content`
+Updates existing Bricks Builder elements by element ID. Merges new settings into existing settings and creates a timestamped backup before writing.
+
+**Input**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `post_id` | integer | — | Page/post ID. **Required.** |
+| `updates` | array | — | Array of `{ element_id, settings }`. **Required.** |
+| `dry_run` | boolean | `false` | Preview changes without writing |
+
+**Output:** `{ success: bool, post_id: int, dry_run: bool, changes: [], elements_updated: int, backup_key: string }`
+
+---
+
+### 10. `postedsocial/manage-page-schema`
+Add, list, or remove JSON-LD schema blocks rendered in `<head>` via `wp_head`. Schemas are also editable in the WP admin page editor via the Page Schemas meta box.
+
+**Input**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `post_id` | integer | — | Page/post ID. **Required.** |
+| `action` | string | `list` | `add`, `remove`, `list`, or `clear` |
+| `key` | string | `""` | Unique schema key. Required for `add`/`remove`. |
+| `data` | object | — | Schema.org JSON-LD object. Required for `add`. Must include `@type`. |
+
+**Output:** `{ success: bool, post_id: int, action: string, schemas: [], total: int }`
+
+---
+
+### 11. `postedsocial/get-images-missing-alt`
+Returns all media library images with empty or missing alt text (`_wp_attachment_image_alt`). Returns the public URL for each image so an AI assistant can visually inspect it before writing alt text.
+
+**Input**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `per_page` | integer | `100` | Max number of images to return |
+
+**Output:** `{ images: [], total: int }`
+
+Each image item includes: `id`, `title`, `filename`, `url`, `alt`.
+
+---
+
+### 12. `postedsocial/update-image-alt`
+Batch-updates alt text for one or more media library images by attachment ID. Writes to `_wp_attachment_image_alt`. Returns per-image status.
+
+**Input**
+| Parameter | Type | Description |
+|---|---|---|
+| `updates` | array | Array of `{ id, alt }` pairs. **Required.** |
+
+**Output:** `{ success: bool, updated: int, items: [] }`
+
+---
+
+## Recommended Workflow: Image Alt Text
+
+The two image alt abilities are designed to work together with an AI assistant that can visually inspect images:
+
+1. Call `get-images-missing-alt` → returns up to 100 image URLs
+2. AI fetches and views each image URL
+3. AI writes contextually accurate alt text based on what it sees
+4. Call `update-image-alt` with a batch of `{ id, alt }` pairs
+
+> **Note:** In the claude.ai browser interface, `web_fetch` cannot load URLs that originate from tool results due to sandbox restrictions. Run this workflow via the Anthropic API or Claude Code for full image inspection capability.
+
+**Decorative images** (SVGs used as shapes, arrows, icons, UI elements) should have alt text set to `""` — this tells screen readers to skip them, which is correct accessibility behavior.
+
+---
+
+## Admin UI
+
+The plugin adds a **Page Schemas (JSON-LD)** meta box to posts and pages in the WordPress admin. This provides a GUI for managing JSON-LD schema blocks without using the MCP connector, including JSON validation and formatting tools.
 
 ---
 
 ## Changelog
 
+### 2.3
+- Added `postedsocial/get-images-missing-alt` — scan media library for images missing alt text
+- Added `postedsocial/update-image-alt` — batch-update image alt text by attachment ID
+
 ### 2.2
-- Added admin meta box "Page Schemas (JSON-LD)" to page and post editors
-- Visual UI for viewing, editing, adding, and deleting schemas without MCP
-- JSON validation and formatting buttons
-- Nonce verification, capability checks, and autosave handling on save
+- Added `postedsocial/manage-page-schema` — add/remove/list JSON-LD schema blocks per page
+- Added Page Schemas admin meta box with JSON validation UI
 
 ### 2.1
-- Replaced `add-bricks-element` with `manage-page-schema`
-- Schema stored in `_ps_page_schemas` post meta, rendered via `wp_head`
-- Supports add, remove, list, and clear actions with unique keys
+- Added `postedsocial/update-bricks-content` with backup support
+- Added `postedsocial/get-bricks-content`
 
 ### 2.0
-- Added Bricks read/write abilities and `update-seo-meta`
-- Extracted shared helpers for Bricks content management
+- Added `postedsocial/update-seo-meta` for Rank Math integration
+- Added `postedsocial/gravity-forms`
 
 ### 1.0
-- Initial release with read-only abilities
+- Initial release: `get-content`, `seo-audit`, `site-structure`, `internal-links`, `plugins-status`
