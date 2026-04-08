@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.2
+ * Version: 2.3
  * Author: Posted Social
  */
 
@@ -215,7 +215,6 @@ function ps_render_schema_meta_box( $post ) {
         if (!key) { alert('Enter a schema key first.'); return; }
         if (!/^[a-z0-9_-]+$/.test(key)) { alert('Key must be lowercase letters, numbers, hyphens, or underscores.'); return; }
 
-        // Check for duplicate
         var existing = document.querySelector('.ps-schema-item[data-key="' + key + '"]');
         if (existing && !confirm('A schema with key "' + key + '" already exists. Adding will replace it. Continue?')) return;
 
@@ -241,11 +240,9 @@ function ps_render_schema_meta_box( $post ) {
 
         errEl.style.display = 'none';
 
-        // Remove existing item with same key
         var existing = document.querySelector('.ps-schema-item[data-key="' + key + '"]');
         if (existing) existing.remove();
 
-        // Remove from deleted list if it was there
         var deleted = document.getElementById('ps-schemas-deleted');
         if (deleted.value) {
             var parts = deleted.value.split(',').filter(function(k) { return k !== key; });
@@ -282,7 +279,6 @@ function ps_render_schema_meta_box( $post ) {
         var emptyMsg = document.getElementById('ps-empty-msg');
         if (emptyMsg) emptyMsg.style.display = 'none';
 
-        // Reset add form
         psCancelAdd();
         document.getElementById('ps-new-key').value = '';
     }
@@ -300,17 +296,12 @@ function ps_render_schema_meta_box( $post ) {
 add_action( 'save_post', 'ps_save_schema_meta_box', 10, 2 );
 
 function ps_save_schema_meta_box( $post_id, $post ) {
-    // Verify nonce.
     if ( ! isset( $_POST['ps_schema_nonce'] ) || ! wp_verify_nonce( $_POST['ps_schema_nonce'], 'ps_schema_meta_box' ) ) {
         return;
     }
-
-    // Skip autosave.
     if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
         return;
     }
-
-    // Check permissions.
     if ( ! current_user_can( 'edit_post', $post_id ) ) {
         return;
     }
@@ -320,7 +311,6 @@ function ps_save_schema_meta_box( $post_id, $post ) {
         $existing = array();
     }
 
-    // Handle deletions.
     if ( ! empty( $_POST['ps_schemas_deleted'] ) ) {
         $deleted_keys = array_filter( explode( ',', sanitize_text_field( $_POST['ps_schemas_deleted'] ) ) );
         foreach ( $deleted_keys as $dk ) {
@@ -328,7 +318,6 @@ function ps_save_schema_meta_box( $post_id, $post ) {
         }
     }
 
-    // Handle adds and updates.
     if ( ! empty( $_POST['ps_schemas'] ) && is_array( $_POST['ps_schemas'] ) ) {
         foreach ( $_POST['ps_schemas'] as $key => $json_str ) {
             $key      = sanitize_key( $key );
@@ -336,7 +325,7 @@ function ps_save_schema_meta_box( $post_id, $post ) {
             $data     = json_decode( $json_str, true );
 
             if ( ! is_array( $data ) || empty( $data['@type'] ) ) {
-                continue; // Skip invalid entries.
+                continue;
             }
 
             if ( empty( $data['@context'] ) ) {
@@ -641,6 +630,67 @@ function ps_register_abilities() {
             'meta'                => array( 'mcp' => array( 'public' => true ) ),
         )
     );
+
+    // 11. Get images missing alt text
+    wp_register_ability(
+        'postedsocial/get-images-missing-alt',
+        array(
+            'category'            => 'postedsocial',
+            'label'               => 'Get Images Missing Alt Text',
+            'description'         => 'Returns all media library images with empty or missing alt text, including their public URL so Claude can view each image before writing alt text.',
+            'input_schema'        => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'per_page' => array( 'type' => 'integer', 'description' => 'Max images to return. Default 100.', 'default' => 100 ),
+                ),
+            ),
+            'output_schema'       => array(
+                'type'       => 'object',
+                'properties' => array( 'images' => array( 'type' => 'array' ), 'total' => array( 'type' => 'integer' ) ),
+            ),
+            'permission_callback' => '__return_true',
+            'execute_callback'    => 'ps_get_images_missing_alt_execute',
+            'meta'                => array( 'mcp' => array( 'public' => true ) ),
+        )
+    );
+
+    // 12. Update image alt text
+    wp_register_ability(
+        'postedsocial/update-image-alt',
+        array(
+            'category'            => 'postedsocial',
+            'label'               => 'Update Image Alt Text',
+            'description'         => 'Batch-updates alt text for one or more media library images by attachment ID.',
+            'input_schema'        => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'updates' => array(
+                        'type'        => 'array',
+                        'description' => 'Array of {id, alt} pairs.',
+                        'items'       => array(
+                            'type'       => 'object',
+                            'properties' => array(
+                                'id'  => array( 'type' => 'integer', 'description' => 'Attachment ID.' ),
+                                'alt' => array( 'type' => 'string', 'description' => 'Alt text to set.' ),
+                            ),
+                            'required' => array( 'id', 'alt' ),
+                        ),
+                    ),
+                ),
+                'required' => array( 'updates' ),
+            ),
+            'output_schema'       => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'updated' => array( 'type' => 'integer' ),
+                    'items'   => array( 'type' => 'array' ),
+                ),
+            ),
+            'permission_callback' => '__return_true',
+            'execute_callback'    => 'ps_update_image_alt_execute',
+            'meta'                => array( 'mcp' => array( 'public' => true ) ),
+        )
+    );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -926,4 +976,66 @@ function ps_manage_page_schema_execute( $input ) {
             foreach ( $schemas as $sk => $sv ) $list[] = array( 'key' => $sk, 'type' => $sv['type'] ?? '', 'added' => $sv['added'] ?? '' );
             return array( 'success' => true, 'post_id' => $post_id, 'action' => 'list', 'schemas' => $list, 'total' => count( $list ) );
     }
+}
+
+// ─── New Callbacks: Image Alt Text ──────────────────────────────────────────
+
+function ps_get_images_missing_alt_execute( $input ) {
+    $per_page = isset( $input['per_page'] ) ? intval( $input['per_page'] ) : 100;
+
+    $images = get_posts( array(
+        'post_type'      => 'attachment',
+        'post_mime_type' => 'image',
+        'post_status'    => 'inherit',
+        'posts_per_page' => $per_page,
+        'orderby'        => 'ID',
+        'order'          => 'ASC',
+        'meta_query'     => array(
+            'relation' => 'OR',
+            array(
+                'key'     => '_wp_attachment_image_alt',
+                'compare' => 'NOT EXISTS',
+            ),
+            array(
+                'key'     => '_wp_attachment_image_alt',
+                'value'   => '',
+                'compare' => '=',
+            ),
+        ),
+    ) );
+
+    $items = array();
+    foreach ( $images as $img ) {
+        $items[] = array(
+            'id'       => $img->ID,
+            'title'    => $img->post_title,
+            'filename' => basename( get_attached_file( $img->ID ) ),
+            'url'      => wp_get_attachment_url( $img->ID ),
+            'alt'      => get_post_meta( $img->ID, '_wp_attachment_image_alt', true ),
+        );
+    }
+
+    return array( 'images' => $items, 'total' => count( $items ) );
+}
+
+function ps_update_image_alt_execute( $input ) {
+    $updates = isset( $input['updates'] ) ? (array) $input['updates'] : array();
+    if ( empty( $updates ) ) return array( 'success' => false, 'error' => 'No updates provided.' );
+
+    $results = array();
+    foreach ( $updates as $item ) {
+        $id  = isset( $item['id'] ) ? intval( $item['id'] ) : 0;
+        $alt = isset( $item['alt'] ) ? sanitize_text_field( $item['alt'] ) : '';
+
+        if ( ! $id || ! get_post( $id ) ) {
+            $results[] = array( 'id' => $id, 'status' => 'error', 'error' => 'Invalid attachment ID.' );
+            continue;
+        }
+
+        update_post_meta( $id, '_wp_attachment_image_alt', $alt );
+        $results[] = array( 'id' => $id, 'alt' => $alt, 'status' => 'updated' );
+    }
+
+    $success_count = count( array_filter( $results, fn( $r ) => $r['status'] === 'updated' ) );
+    return array( 'success' => true, 'updated' => $success_count, 'items' => $results );
 }
