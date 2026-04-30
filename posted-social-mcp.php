@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.6
+ * Version: 2.7
  * Author: Posted Social
  */
 
@@ -691,6 +691,49 @@ function ps_register_abilities() {
             'meta'                => array( 'mcp' => array( 'public' => true ) ),
         )
     );
+
+    // 13. Create post
+    wp_register_ability(
+        'postedsocial/create-post',
+        array(
+            'category'            => 'postedsocial',
+            'label'               => 'Create Post',
+            'description'         => 'Creates a new WordPress post or page. Required: title, content. Optional: post_type (post|page, default post), status (draft|pending|publish|private, default draft), slug, excerpt, categories, tags, author_id, featured_image_url, meta (Rank Math SEO meta in same call). Returns post_id, edit_url, and view_url.',
+            'input_schema'        => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'title'              => array( 'type' => 'string', 'description' => 'Post title. Required.' ),
+                    'content'            => array( 'type' => 'string', 'description' => 'HTML body content. Required.' ),
+                    'post_type'          => array( 'type' => 'string', 'description' => '"post" or "page". Default "post".', 'default' => 'post' ),
+                    'status'             => array( 'type' => 'string', 'description' => '"draft", "pending", "publish", or "private". Default "draft".', 'default' => 'draft' ),
+                    'slug'               => array( 'type' => 'string', 'description' => 'URL slug. Auto-generated from title if omitted.', 'default' => '' ),
+                    'excerpt'            => array( 'type' => 'string', 'description' => 'Manual excerpt. Optional.', 'default' => '' ),
+                    'categories'         => array( 'type' => 'array', 'description' => 'Category names or slugs. Auto-created if missing. Posts only.', 'default' => array() ),
+                    'tags'               => array( 'type' => 'array', 'description' => 'Tag names. Auto-created if missing. Posts only.', 'default' => array() ),
+                    'author_id'          => array( 'type' => 'integer', 'description' => 'WP user ID for author. Defaults to current user.', 'default' => 0 ),
+                    'featured_image_url' => array( 'type' => 'string', 'description' => 'External URL to sideload as featured image. Optional.', 'default' => '' ),
+                    'meta'               => array( 'type' => 'object', 'description' => 'Optional Rank Math meta in same call: seo_title, seo_description, focus_keyword, canonical, schema_type, robots.' ),
+                ),
+                'required' => array( 'title', 'content' ),
+            ),
+            'output_schema'       => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'success'      => array( 'type' => 'boolean' ),
+                    'post_id'      => array( 'type' => 'integer' ),
+                    'edit_url'     => array( 'type' => 'string' ),
+                    'view_url'     => array( 'type' => 'string' ),
+                    'status'       => array( 'type' => 'string' ),
+                    'slug'         => array( 'type' => 'string' ),
+                    'post_type'    => array( 'type' => 'string' ),
+                    'meta_updated' => array( 'type' => 'array' ),
+                ),
+            ),
+            'permission_callback' => '__return_true',
+            'execute_callback'    => 'ps_create_post_execute',
+            'meta'                => array( 'mcp' => array( 'public' => true ) ),
+        )
+    );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -1153,4 +1196,144 @@ function ps_update_image_alt_execute( $input ) {
 
     $success_count = count( array_filter( $results, fn( $r ) => $r['status'] === 'updated' ) );
     return array( 'success' => true, 'updated' => $success_count, 'items' => $results );
+}
+
+// ─── New Callbacks: Create Post ─────────────────────────────────────────────
+
+function ps_create_post_execute( $input ) {
+    // Required fields
+    $title   = isset( $input['title'] ) ? sanitize_text_field( $input['title'] ) : '';
+    $content = isset( $input['content'] ) ? wp_kses_post( $input['content'] ) : '';
+
+    if ( empty( $title ) ) {
+        return array( 'success' => false, 'error' => 'Title is required.' );
+    }
+    if ( empty( $content ) ) {
+        return array( 'success' => false, 'error' => 'Content is required.' );
+    }
+
+    // post_type validation
+    $post_type = isset( $input['post_type'] ) ? sanitize_key( $input['post_type'] ) : 'post';
+    if ( ! in_array( $post_type, array( 'post', 'page' ), true ) ) {
+        return array( 'success' => false, 'error' => 'post_type must be "post" or "page".' );
+    }
+
+    // status validation
+    $status = isset( $input['status'] ) ? sanitize_key( $input['status'] ) : 'draft';
+    $allowed_statuses = array( 'draft', 'pending', 'publish', 'private' );
+    if ( ! in_array( $status, $allowed_statuses, true ) ) {
+        return array( 'success' => false, 'error' => 'status must be one of: draft, pending, publish, private.' );
+    }
+
+    // Build postarr
+    $postarr = array(
+        'post_title'   => $title,
+        'post_content' => $content,
+        'post_status'  => $status,
+        'post_type'    => $post_type,
+    );
+
+    if ( ! empty( $input['slug'] ) ) {
+        $postarr['post_name'] = sanitize_title( $input['slug'] );
+    }
+    if ( ! empty( $input['excerpt'] ) ) {
+        $postarr['post_excerpt'] = wp_kses_post( $input['excerpt'] );
+    }
+    if ( ! empty( $input['author_id'] ) ) {
+        $author_id = intval( $input['author_id'] );
+        if ( $author_id > 0 && get_userdata( $author_id ) ) {
+            $postarr['post_author'] = $author_id;
+        }
+    }
+
+    // Insert post
+    $post_id = wp_insert_post( $postarr, true );
+    if ( is_wp_error( $post_id ) ) {
+        return array( 'success' => false, 'error' => $post_id->get_error_message() );
+    }
+
+    // Categories (post type only). Accepts names or slugs; auto-creates if missing.
+    if ( 'post' === $post_type && ! empty( $input['categories'] ) && is_array( $input['categories'] ) ) {
+        $cat_ids = array();
+        foreach ( $input['categories'] as $cat ) {
+            $cat = sanitize_text_field( $cat );
+            if ( empty( $cat ) ) continue;
+
+            $term = get_term_by( 'slug', sanitize_title( $cat ), 'category' );
+            if ( ! $term ) {
+                $term = get_term_by( 'name', $cat, 'category' );
+            }
+            if ( ! $term ) {
+                $new = wp_insert_term( $cat, 'category' );
+                if ( ! is_wp_error( $new ) && isset( $new['term_id'] ) ) {
+                    $cat_ids[] = intval( $new['term_id'] );
+                }
+            } else {
+                $cat_ids[] = intval( $term->term_id );
+            }
+        }
+        if ( ! empty( $cat_ids ) ) {
+            wp_set_post_categories( $post_id, $cat_ids );
+        }
+    }
+
+    // Tags (post type only). wp_set_post_tags auto-creates missing tags.
+    if ( 'post' === $post_type && ! empty( $input['tags'] ) && is_array( $input['tags'] ) ) {
+        $tags = array_filter( array_map( 'sanitize_text_field', $input['tags'] ) );
+        if ( ! empty( $tags ) ) {
+            wp_set_post_tags( $post_id, $tags );
+        }
+    }
+
+    // Featured image sideload from external URL
+    $featured_image_id = 0;
+    if ( ! empty( $input['featured_image_url'] ) ) {
+        if ( ! function_exists( 'media_sideload_image' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+        $sideload = media_sideload_image( esc_url_raw( $input['featured_image_url'] ), $post_id, null, 'id' );
+        if ( ! is_wp_error( $sideload ) ) {
+            $featured_image_id = intval( $sideload );
+            set_post_thumbnail( $post_id, $featured_image_id );
+        }
+    }
+
+    // Optional Rank Math meta in same call
+    $meta_updated = array();
+    if ( ! empty( $input['meta'] ) && is_array( $input['meta'] ) ) {
+        $m   = $input['meta'];
+        $map = array(
+            'seo_title'       => 'rank_math_title',
+            'seo_description' => 'rank_math_description',
+            'focus_keyword'   => 'rank_math_focus_keyword',
+            'canonical'       => 'rank_math_canonical_url',
+            'schema_type'     => 'rank_math_rich_snippet',
+        );
+        foreach ( $map as $k => $mk ) {
+            if ( ! empty( $m[ $k ] ) ) {
+                update_post_meta( $post_id, $mk, sanitize_text_field( $m[ $k ] ) );
+                $meta_updated[] = $k;
+            }
+        }
+        if ( ! empty( $m['robots'] ) && is_array( $m['robots'] ) ) {
+            update_post_meta( $post_id, 'rank_math_robots', array_map( 'sanitize_text_field', $m['robots'] ) );
+            $meta_updated[] = 'robots';
+        }
+    }
+
+    $post = get_post( $post_id );
+
+    return array(
+        'success'           => true,
+        'post_id'           => $post_id,
+        'edit_url'          => admin_url( 'post.php?post=' . $post_id . '&action=edit' ),
+        'view_url'          => get_permalink( $post_id ),
+        'status'            => $post ? $post->post_status : $status,
+        'slug'              => $post ? $post->post_name : '',
+        'post_type'         => $post_type,
+        'featured_image_id' => $featured_image_id,
+        'meta_updated'      => $meta_updated,
+    );
 }
