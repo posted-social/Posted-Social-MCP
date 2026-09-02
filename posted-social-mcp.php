@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.7
+ * Version: 2.8
  * Author: Posted Social
  */
 
@@ -726,11 +726,59 @@ function ps_register_abilities() {
                     'status'       => array( 'type' => 'string' ),
                     'slug'         => array( 'type' => 'string' ),
                     'post_type'    => array( 'type' => 'string' ),
+                    'featured_image_id' => array( 'type' => 'integer' ),
                     'meta_updated' => array( 'type' => 'array' ),
                 ),
             ),
             'permission_callback' => '__return_true',
             'execute_callback'    => 'ps_create_post_execute',
+            'meta'                => array( 'mcp' => array( 'public' => true ) ),
+        )
+    );
+
+    // 14. Update post
+    wp_register_ability(
+        'postedsocial/update-post',
+        array(
+            'category'            => 'postedsocial',
+            'label'               => 'Update Post',
+            'description'         => 'Updates an existing WordPress post or page. Only the fields you pass are changed — omitted fields are left untouched. Required: post_id. Optional: title, content, status, slug, excerpt, categories, tags, author_id, featured_image_url, meta (Rank Math SEO meta in same call). Returns the list of fields actually updated.',
+            'input_schema'        => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'post_id'            => array( 'type' => 'integer', 'description' => 'ID of the post or page to update. Required.' ),
+                    'title'              => array( 'type' => 'string', 'description' => 'New title. Omit to leave unchanged. Cannot be set to an empty string.' ),
+                    'content'            => array( 'type' => 'string', 'description' => 'New HTML body content. Omit to leave unchanged. Cannot be set to an empty string. Replaces the existing content entirely.' ),
+                    'status'             => array( 'type' => 'string', 'description' => '"draft", "pending", "publish", or "private". Omit to leave unchanged.' ),
+                    'slug'               => array( 'type' => 'string', 'description' => 'New URL slug. Omit to leave unchanged. Pass "" to let WordPress regenerate it from the title (applies once the post is published).' ),
+                    'excerpt'            => array( 'type' => 'string', 'description' => 'New manual excerpt. Omit to leave unchanged. Pass "" to clear it.' ),
+                    'categories'         => array( 'type' => 'array', 'description' => 'Category names or slugs. Replaces existing categories. Auto-created if missing. Pass [] to clear. Posts only.' ),
+                    'tags'               => array( 'type' => 'array', 'description' => 'Tag names. Replaces existing tags. Auto-created if missing. Pass [] to clear. Posts only.' ),
+                    'author_id'          => array( 'type' => 'integer', 'description' => 'WP user ID for author. Omit to leave unchanged.' ),
+                    'featured_image_url' => array( 'type' => 'string', 'description' => 'External URL to sideload and set as the featured image, replacing any existing one. Omit to leave unchanged.' ),
+                    'meta'               => array( 'type' => 'object', 'description' => 'Optional Rank Math meta in same call: seo_title, seo_description, focus_keyword, canonical, schema_type, robots. Non-empty values only; use update-seo-meta semantics.' ),
+                ),
+                'required' => array( 'post_id' ),
+            ),
+            'output_schema'       => array(
+                'type'       => 'object',
+                'properties' => array(
+                    'success'           => array( 'type' => 'boolean' ),
+                    'post_id'           => array( 'type' => 'integer' ),
+                    'updated'           => array( 'type' => 'array' ),
+                    'skipped'           => array( 'type' => 'array' ),
+                    'edit_url'          => array( 'type' => 'string' ),
+                    'view_url'          => array( 'type' => 'string' ),
+                    'status'            => array( 'type' => 'string' ),
+                    'slug'              => array( 'type' => 'string' ),
+                    'post_type'         => array( 'type' => 'string' ),
+                    'featured_image_id' => array( 'type' => 'integer' ),
+                    'meta_updated'      => array( 'type' => 'array' ),
+                    'message'           => array( 'type' => 'string' ),
+                ),
+            ),
+            'permission_callback' => '__return_true',
+            'execute_callback'    => 'ps_update_post_execute',
             'meta'                => array( 'mcp' => array( 'public' => true ) ),
         )
     );
@@ -1335,5 +1383,237 @@ function ps_create_post_execute( $input ) {
         'post_type'         => $post_type,
         'featured_image_id' => $featured_image_id,
         'meta_updated'      => $meta_updated,
+    );
+}
+
+// ─── Update Post Helpers ────────────────────────────────────────────────────
+
+/**
+ * Resolves an array of term names/slugs to term IDs, creating any that are missing.
+ *
+ * @param array  $terms    Names or slugs.
+ * @param string $taxonomy Taxonomy name.
+ * @return array Term IDs.
+ */
+function ps_resolve_term_ids( $terms, $taxonomy ) {
+    $ids = array();
+
+    foreach ( (array) $terms as $t ) {
+        $t = sanitize_text_field( $t );
+        if ( '' === $t ) {
+            continue;
+        }
+
+        $term = get_term_by( 'slug', sanitize_title( $t ), $taxonomy );
+        if ( ! $term ) {
+            $term = get_term_by( 'name', $t, $taxonomy );
+        }
+
+        if ( ! $term ) {
+            $new = wp_insert_term( $t, $taxonomy );
+            if ( ! is_wp_error( $new ) && isset( $new['term_id'] ) ) {
+                $ids[] = intval( $new['term_id'] );
+            }
+        } else {
+            $ids[] = intval( $term->term_id );
+        }
+    }
+
+    return $ids;
+}
+
+/**
+ * Writes Rank Math SEO meta for a post. Mirrors ps_update_seo_meta_execute's mapping:
+ * only non-empty values are written, so this never clears an existing value.
+ *
+ * @param int   $post_id Post ID.
+ * @param array $meta    Keys: seo_title, seo_description, focus_keyword, canonical, schema_type, robots.
+ * @return array Names of the keys that were written.
+ */
+function ps_apply_rank_math_meta( $post_id, $meta ) {
+    $map = array(
+        'seo_title'       => 'rank_math_title',
+        'seo_description' => 'rank_math_description',
+        'focus_keyword'   => 'rank_math_focus_keyword',
+        'canonical'       => 'rank_math_canonical_url',
+        'schema_type'     => 'rank_math_rich_snippet',
+    );
+
+    $written = array();
+
+    foreach ( $map as $k => $mk ) {
+        if ( ! empty( $meta[ $k ] ) ) {
+            update_post_meta( $post_id, $mk, sanitize_text_field( $meta[ $k ] ) );
+            $written[] = $k;
+        }
+    }
+
+    if ( ! empty( $meta['robots'] ) && is_array( $meta['robots'] ) ) {
+        update_post_meta( $post_id, 'rank_math_robots', array_map( 'sanitize_text_field', $meta['robots'] ) );
+        $written[] = 'robots';
+    }
+
+    return $written;
+}
+
+// ─── Update Post ────────────────────────────────────────────────────────────
+
+function ps_update_post_execute( $input ) {
+    $post_id = isset( $input['post_id'] ) ? intval( $input['post_id'] ) : 0;
+    if ( $post_id <= 0 ) {
+        return array( 'success' => false, 'error' => 'post_id is required and must be a positive integer.' );
+    }
+
+    $post = get_post( $post_id );
+    if ( ! $post ) {
+        return array( 'success' => false, 'error' => sprintf( 'No post found with ID %d.', $post_id ) );
+    }
+
+    $post_type = $post->post_type;
+    if ( ! in_array( $post_type, array( 'post', 'page' ), true ) ) {
+        return array(
+            'success' => false,
+            'error'   => sprintf( 'Post %d has post type "%s". This ability only updates posts and pages.', $post_id, $post_type ),
+        );
+    }
+
+    $postarr = array( 'ID' => $post_id );
+    $updated = array();
+    $skipped = array();
+
+    // Title. Present-but-empty is rejected rather than silently blanking the post.
+    if ( array_key_exists( 'title', $input ) ) {
+        $title = sanitize_text_field( $input['title'] );
+        if ( '' === $title ) {
+            return array( 'success' => false, 'error' => 'title cannot be set to an empty string. Omit it to leave the title unchanged.' );
+        }
+        $postarr['post_title'] = $title;
+        $updated[]             = 'title';
+    }
+
+    // Content. Same guard — an empty string here would wipe the page body.
+    if ( array_key_exists( 'content', $input ) ) {
+        $content = wp_kses_post( $input['content'] );
+        if ( '' === trim( $content ) ) {
+            return array( 'success' => false, 'error' => 'content cannot be set to an empty string. Omit it to leave the content unchanged.' );
+        }
+        $postarr['post_content'] = $content;
+        $updated[]               = 'content';
+    }
+
+    // Status.
+    if ( array_key_exists( 'status', $input ) ) {
+        $status           = sanitize_key( $input['status'] );
+        $allowed_statuses = array( 'draft', 'pending', 'publish', 'private' );
+        if ( ! in_array( $status, $allowed_statuses, true ) ) {
+            return array( 'success' => false, 'error' => 'status must be one of: draft, pending, publish, private.' );
+        }
+        $postarr['post_status'] = $status;
+        $updated[]              = 'status';
+    }
+
+    // Slug. "" is a legitimate value: WordPress regenerates it from the title,
+    // though only once the post leaves draft/pending status.
+    if ( array_key_exists( 'slug', $input ) ) {
+        $postarr['post_name'] = sanitize_title( $input['slug'] );
+        $updated[]            = 'slug';
+    }
+
+    // Excerpt. "" clears it.
+    if ( array_key_exists( 'excerpt', $input ) ) {
+        $postarr['post_excerpt'] = wp_kses_post( $input['excerpt'] );
+        $updated[]               = 'excerpt';
+    }
+
+    // Author.
+    if ( ! empty( $input['author_id'] ) ) {
+        $author_id = intval( $input['author_id'] );
+        if ( $author_id <= 0 || ! get_userdata( $author_id ) ) {
+            return array( 'success' => false, 'error' => sprintf( 'author_id %d is not a valid WP user.', $author_id ) );
+        }
+        $postarr['post_author'] = $author_id;
+        $updated[]              = 'author_id';
+    }
+
+    // Apply the core post update only if there is something to change.
+    if ( count( $postarr ) > 1 ) {
+        $result = wp_update_post( $postarr, true );
+        if ( is_wp_error( $result ) ) {
+            return array( 'success' => false, 'error' => $result->get_error_message() );
+        }
+    }
+
+    // Categories — replaces the existing set. Posts only.
+    if ( array_key_exists( 'categories', $input ) ) {
+        if ( ! is_array( $input['categories'] ) ) {
+            return array( 'success' => false, 'error' => 'categories must be an array of names or slugs.' );
+        }
+        if ( 'post' === $post_type ) {
+            wp_set_post_categories( $post_id, ps_resolve_term_ids( $input['categories'], 'category' ) );
+            $updated[] = 'categories';
+        } else {
+            $skipped[] = 'categories (pages have no categories)';
+        }
+    }
+
+    // Tags — replaces the existing set. Posts only.
+    if ( array_key_exists( 'tags', $input ) ) {
+        if ( ! is_array( $input['tags'] ) ) {
+            return array( 'success' => false, 'error' => 'tags must be an array of tag names.' );
+        }
+        if ( 'post' === $post_type ) {
+            $tags = array_values( array_filter( array_map( 'sanitize_text_field', $input['tags'] ) ) );
+            wp_set_post_tags( $post_id, $tags );
+            $updated[] = 'tags';
+        } else {
+            $skipped[] = 'tags (pages have no tags)';
+        }
+    }
+
+    // Featured image — sideloads the URL and replaces any existing thumbnail.
+    $featured_image_id = intval( get_post_thumbnail_id( $post_id ) );
+    if ( ! empty( $input['featured_image_url'] ) ) {
+        if ( ! function_exists( 'media_sideload_image' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+        $sideload = media_sideload_image( esc_url_raw( $input['featured_image_url'] ), $post_id, null, 'id' );
+        if ( is_wp_error( $sideload ) ) {
+            $skipped[] = 'featured_image_url (' . $sideload->get_error_message() . ')';
+        } else {
+            $featured_image_id = intval( $sideload );
+            set_post_thumbnail( $post_id, $featured_image_id );
+            $updated[] = 'featured_image_url';
+        }
+    }
+
+    // Optional Rank Math meta in the same call.
+    $meta_updated = array();
+    if ( ! empty( $input['meta'] ) && is_array( $input['meta'] ) ) {
+        $meta_updated = ps_apply_rank_math_meta( $post_id, $input['meta'] );
+        if ( ! empty( $meta_updated ) ) {
+            $updated[] = 'meta';
+        }
+    }
+
+    clean_post_cache( $post_id );
+    $fresh = get_post( $post_id );
+
+    return array(
+        'success'           => true,
+        'post_id'           => $post_id,
+        'updated'           => $updated,
+        'skipped'           => $skipped,
+        'edit_url'          => admin_url( 'post.php?post=' . $post_id . '&action=edit' ),
+        'view_url'          => get_permalink( $post_id ),
+        'status'            => $fresh ? $fresh->post_status : $post->post_status,
+        'slug'              => $fresh ? $fresh->post_name : $post->post_name,
+        'post_type'         => $post_type,
+        'featured_image_id' => $featured_image_id,
+        'meta_updated'      => $meta_updated,
+        'message'           => empty( $updated )
+            ? sprintf( 'No fields were changed for post %d.', $post_id )
+            : sprintf( 'Updated %d field(s) for post %d: %s.', count( $updated ), $post_id, implode( ', ', $updated ) ),
     );
 }

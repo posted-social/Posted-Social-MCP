@@ -1,6 +1,6 @@
 # Posted Social MCP Abilities
 
-**Version:** 2.3  
+**Version:** 2.8  
 **Author:** Posted Social  
 **Requires:** WordPress with WP Abilities API
 
@@ -176,6 +176,62 @@ Batch-updates alt text for one or more media library images by attachment ID. Wr
 
 ---
 
+### 13. `postedsocial/create-post`
+Creates a new WordPress post or page. Can set taxonomies, sideload a featured image from an external URL, and write Rank Math SEO meta in the same call.
+
+**Input**
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `title` | string | — | Post title. **Required.** |
+| `content` | string | — | HTML body content. **Required.** |
+| `post_type` | string | `post` | `post` or `page` |
+| `status` | string | `draft` | `draft`, `pending`, `publish`, or `private` |
+| `slug` | string | auto | URL slug. Generated from the title if omitted |
+| `excerpt` | string | `""` | Manual excerpt |
+| `categories` | array | `[]` | Category names or slugs. Auto-created if missing. Posts only |
+| `tags` | array | `[]` | Tag names. Auto-created if missing. Posts only |
+| `author_id` | integer | current user | WP user ID for the author |
+| `featured_image_url` | string | `""` | External URL to sideload as the featured image |
+| `meta` | object | — | Rank Math meta: `seo_title`, `seo_description`, `focus_keyword`, `canonical`, `schema_type`, `robots` |
+
+**Output:** `{ success: bool, post_id: int, edit_url: string, view_url: string, status: string, slug: string, post_type: string, featured_image_id: int, meta_updated: [] }`
+
+Categories and tags are ignored for `post_type: page`. A failed featured-image sideload does not fail the call — the post is still created and `featured_image_id` stays `0`.
+
+---
+
+### 14. `postedsocial/update-post`
+Updates an existing post or page. **Only the fields you pass are changed** — anything omitted is left exactly as it was, so a partial update is safe.
+
+**Input**
+| Parameter | Type | Description |
+|---|---|---|
+| `post_id` | integer | ID of the post or page to update. **Required.** |
+| `title` | string | New title. Cannot be set to `""` |
+| `content` | string | New HTML body. Replaces existing content entirely. Cannot be set to `""` |
+| `status` | string | `draft`, `pending`, `publish`, or `private` |
+| `slug` | string | New URL slug. Pass `""` to let WordPress regenerate it from the title (takes effect once the post is published) |
+| `excerpt` | string | New excerpt. Pass `""` to clear it |
+| `categories` | array | Replaces existing categories. Auto-created if missing. Pass `[]` to clear. Posts only |
+| `tags` | array | Replaces existing tags. Auto-created if missing. Pass `[]` to clear. Posts only |
+| `author_id` | integer | WP user ID for the author |
+| `featured_image_url` | string | External URL to sideload, replacing any existing featured image |
+| `meta` | object | Rank Math meta, same keys as `create-post` |
+
+**Output:** `{ success: bool, post_id: int, updated: [], skipped: [], edit_url: string, view_url: string, status: string, slug: string, post_type: string, featured_image_id: int, meta_updated: [], message: string }`
+
+**Semantics worth knowing**
+
+- **Omitted vs. empty.** Omitting a key leaves the field untouched. Passing `""` clears `excerpt`, and hands `slug` back to WordPress to regenerate from the title. `title` and `content` reject `""` outright rather than silently blanking the post — omit them instead.
+- **`content` replaces, it does not append.** Read the current body with `get-content` first if you intend to extend it.
+- **`categories` / `tags` replace the whole set** rather than adding to it. Pass the full intended list.
+- **`updated` vs. `skipped`.** `updated` lists the fields that actually changed. `skipped` explains anything that was requested but not applied — categories/tags on a page, or a featured-image sideload that failed — so a partial success is never silent.
+- **`meta` only writes non-empty values,** matching `update-seo-meta`. It cannot clear an existing SEO field.
+- **Posts and pages only.** Any other post type is rejected with an error rather than partially updated.
+- **Bricks pages.** This ability writes `post_content`. Pages built with Bricks store their content in `_bricks_page_content_2` and are unaffected by it — use `update-bricks-content` for those.
+
+---
+
 ## Recommended Workflow: Image Alt Text
 
 The two image alt abilities are designed to work together with an AI assistant that can visually inspect images:
@@ -198,6 +254,17 @@ The plugin adds a **Page Schemas (JSON-LD)** meta box to posts and pages in the 
 ---
 
 ## Changelog
+
+### 2.8
+- Added `postedsocial/update-post` — partial updates to an existing post or page, with `updated`/`skipped` reporting
+- Added `featured_image_id` to the documented `create-post` output (it was already being returned)
+
+### 2.7
+- Added `postedsocial/create-post` — create posts and pages with taxonomies, featured image sideload, and Rank Math meta in one call
+
+### 2.4 – 2.6
+- Hardened `postedsocial/update-bricks-content` writes: verify the write landed by reading `wp_postmeta` directly, fall back to a direct `$wpdb` write when a filter silently rejects `update_post_meta`, and invalidate persistent object caches (Kinsta Redis, etc.)
+- `ps_get_bricks_elements()` now returns an empty array instead of a malformed value when the stored meta will not decode
 
 ### 2.3
 - Added `postedsocial/get-images-missing-alt` — scan media library for images missing alt text
