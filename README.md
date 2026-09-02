@@ -1,6 +1,6 @@
 # Posted Social MCP Abilities
 
-**Version:** 2.9  
+**Version:** 2.10  
 **Author:** Posted Social  
 **Requires:** WordPress with WP Abilities API
 
@@ -19,12 +19,12 @@ All abilities are registered under the `postedsocial` category.
 ## Abilities
 
 ### 1. `postedsocial/get-content`
-Returns published pages and posts with full content, SEO meta (Rank Math), URL, date, and word count.
+Returns published content with full body text, SEO meta (Rank Math), URL, date, and word count.
 
 **Input**
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `post_type` | string | `all` | `post`, `page`, or `all` |
+| `post_type` | string | `all` | A post type slug (`post`, `page`, `projects`, …) or `all` — see [Writable post types](#writable-post-types) |
 | `per_page` | integer | `50` | Number of items to return |
 | `search` | string | `""` | Optional keyword filter |
 
@@ -38,7 +38,7 @@ Returns SEO meta for all published pages/posts with issue flags. Flags include: 
 **Input**
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `post_type` | string | `all` | `post`, `page`, or `all` |
+| `post_type` | string | `all` | A post type slug or `all` — see [Writable post types](#writable-post-types) |
 | `per_page` | integer | `100` | Number of items to return |
 
 **Output:** `{ items: [], total: int }`
@@ -55,15 +55,17 @@ Returns the full page hierarchy with parent/child relationships, menu order, dep
 ---
 
 ### 4. `postedsocial/internal-links`
-Analyzes internal linking for a specific page or all pages. Returns each page's outbound internal links with anchor text.
+Analyzes internal linking for a specific post or across all content. Returns each item's outbound internal links with anchor text.
 
 **Input**
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `post_id` | integer | `0` | Specific post/page ID, or `0` for all |
-| `per_page` | integer | `50` | Number of pages to analyze |
+| `post_id` | integer | `0` | Specific post ID, or `0` for all |
+| `per_page` | integer | `50` | Number of items to analyze |
 
 **Output:** `{ items: [] }`
+
+Each item includes `id`, `title`, `url`, `post_type`, `internal_links`, `link_count`. With `post_id: 0` this scans every [writable post type](#writable-post-types), not just posts and pages.
 
 ---
 
@@ -236,6 +238,32 @@ Permission is gated by `current_user_can( 'edit_post', $post_id )` rather than a
 
 ---
 
+## Writable post types
+
+`post_type: all` on `get-content`, `seo-audit`, and `internal-links` resolves to every **writable content type** on the site — not a hardcoded `post` + `page` list. That means custom types such as `projects` are included in audits by default instead of being silently omitted.
+
+The set is built by `ps_get_writable_post_types()`:
+
+1. Start from every post type registered with an admin UI (`show_ui => true`).
+2. Remove WordPress's own infrastructure types, which are not editorial content: `attachment`, `wp_block`, `wp_template`, `wp_template_part`, `wp_global_styles`, `wp_navigation`, `wp_font_family`, `wp_font_face`.
+3. Pass the result through the `ps_writable_post_types` filter.
+4. Fall back to `['post', 'page']` if that yields nothing, so a misbehaving filter can never produce an empty query.
+
+To add or remove a type without touching the plugin:
+
+```php
+add_filter( 'ps_writable_post_types', function ( $types ) {
+    $types[] = 'testimonial';                          // include
+    return array_diff( $types, array( 'projects' ) );  // exclude
+} );
+```
+
+**This set is not filtered by the current user's capabilities.** The read abilities are usable without an authenticated user, so capability-filtering `all` would make them return nothing on an unauthenticated connection. Per-post write permission is enforced in `create-post` and `update-post` instead.
+
+**Not affected:** `site-structure` is page-only by design (it uses `get_pages()` to walk the page hierarchy), and the Page Schemas admin meta box still appears on posts and pages only.
+
+---
+
 ## Recommended Workflow: Image Alt Text
 
 The two image alt abilities are designed to work together with an AI assistant that can visually inspect images:
@@ -258,6 +286,11 @@ The plugin adds a **Page Schemas (JSON-LD)** meta box to posts and pages in the 
 ---
 
 ## Changelog
+
+### 2.10
+- `post_type: all` on `get-content`, `seo-audit`, and `internal-links` now covers every writable content type instead of a hardcoded `post` + `page` list, so custom types appear in audits
+- Added `ps_get_writable_post_types()` and the `ps_writable_post_types` filter
+- `internal-links` items now include `post_type`
 
 ### 2.9
 - `create-post` and `update-post` now work with **any registered post type**, not just `post` and `page`

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.9
+ * Version: 2.10
  * Author: Posted Social
  */
 
@@ -378,7 +378,7 @@ function ps_register_abilities() {
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_type' => array( 'type' => 'string', 'description' => 'post, page, or all. Default all.', 'default' => 'all' ),
+                    'post_type' => array( 'type' => 'string', 'description' => 'A post type slug (post, page, projects, ...) or "all" for every writable content type. Default all.', 'default' => 'all' ),
                     'per_page'  => array( 'type' => 'integer', 'description' => 'Number of items. Default 50.', 'default' => 50 ),
                     'search'    => array( 'type' => 'string', 'description' => 'Optional keyword filter.', 'default' => '' ),
                 ),
@@ -403,7 +403,7 @@ function ps_register_abilities() {
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
-                    'post_type' => array( 'type' => 'string', 'description' => 'post, page, or all. Default all.', 'default' => 'all' ),
+                    'post_type' => array( 'type' => 'string', 'description' => 'A post type slug (post, page, projects, ...) or "all" for every writable content type. Default all.', 'default' => 'all' ),
                     'per_page'  => array( 'type' => 'integer', 'description' => 'Number of items. Default 100.', 'default' => 100 ),
                 ),
             ),
@@ -786,6 +786,48 @@ function ps_register_abilities() {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/**
+ * Returns the post types the write abilities can target — the site's real content
+ * types. Used to resolve post_type: "all" on the read abilities so custom types
+ * (projects, etc.) are included instead of being silently dropped.
+ *
+ * Starts from every post type registered with an admin UI, then removes
+ * WordPress's own infrastructure types (media, reusable blocks, block-theme
+ * templates), which are not editorial content.
+ *
+ * Deliberately NOT filtered by the current user's capabilities: the read
+ * abilities are usable without an authenticated user, and per-post write
+ * permission is enforced in create-post / update-post instead. Falls back to
+ * post + page so a filter returning nothing can never produce an empty query.
+ *
+ * @return array Post type slugs.
+ */
+function ps_get_writable_post_types() {
+    $excluded = array(
+        'attachment',        // media library; see the image alt abilities
+        'wp_block',          // reusable blocks / patterns
+        'wp_template',
+        'wp_template_part',
+        'wp_global_styles',
+        'wp_navigation',
+        'wp_font_family',
+        'wp_font_face',
+    );
+
+    $types = array_values( array_diff( get_post_types( array( 'show_ui' => true ), 'names' ), $excluded ) );
+
+    /**
+     * Filters the post types treated as writable content by this plugin.
+     *
+     * @param array $types Post type slugs.
+     */
+    $types = apply_filters( 'ps_writable_post_types', $types );
+
+    $types = is_array( $types ) ? array_values( array_unique( array_filter( $types ) ) ) : array();
+
+    return ! empty( $types ) ? $types : array( 'post', 'page' );
+}
+
 function ps_get_bricks_elements( $post_id ) {
     $meta = get_post_meta( $post_id, '_bricks_page_content_2', true );
     if ( empty( $meta ) ) return array();
@@ -878,7 +920,7 @@ function ps_get_content_execute( $input ) {
 
     $args = array(
         'post_status' => 'publish', 'posts_per_page' => $per_page, 'orderby' => 'date', 'order' => 'DESC',
-        'post_type'   => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
+        'post_type'   => 'all' === $post_type ? ps_get_writable_post_types() : $post_type,
     );
     if ( ! empty( $search ) ) $args['s'] = $search;
 
@@ -908,7 +950,7 @@ function ps_seo_audit_execute( $input ) {
 
     $query = new WP_Query( array(
         'post_status' => 'publish', 'posts_per_page' => $per_page, 'orderby' => 'menu_order', 'order' => 'ASC',
-        'post_type'   => 'all' === $post_type ? array( 'post', 'page' ) : $post_type,
+        'post_type'   => 'all' === $post_type ? ps_get_writable_post_types() : $post_type,
     ) );
 
     $items = array();
@@ -965,7 +1007,7 @@ function ps_internal_links_execute( $input ) {
 
     $posts = $post_id > 0
         ? array( get_post( $post_id ) )
-        : ( new WP_Query( array( 'post_status' => 'publish', 'posts_per_page' => $per_page, 'post_type' => array( 'post', 'page' ) ) ) )->posts;
+        : ( new WP_Query( array( 'post_status' => 'publish', 'posts_per_page' => $per_page, 'post_type' => ps_get_writable_post_types() ) ) )->posts;
 
     $items = array();
     foreach ( $posts as $post ) {
@@ -978,7 +1020,7 @@ function ps_internal_links_execute( $input ) {
                 }
             }
         }
-        $items[] = array( 'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ), 'internal_links' => $links, 'link_count' => count( $links ) );
+        $items[] = array( 'id' => $post->ID, 'title' => $post->post_title, 'url' => get_permalink( $post->ID ), 'post_type' => $post->post_type, 'internal_links' => $links, 'link_count' => count( $links ) );
     }
     return array( 'items' => $items );
 }
