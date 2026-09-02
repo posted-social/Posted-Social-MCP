@@ -1,6 +1,6 @@
 # Posted Social MCP Abilities
 
-**Version:** 2.8  
+**Version:** 2.9  
 **Author:** Posted Social  
 **Requires:** WordPress with WP Abilities API
 
@@ -177,31 +177,35 @@ Batch-updates alt text for one or more media library images by attachment ID. Wr
 ---
 
 ### 13. `postedsocial/create-post`
-Creates a new WordPress post or page. Can set taxonomies, sideload a featured image from an external URL, and write Rank Math SEO meta in the same call.
+Creates a new post, page, or **any other registered post type** (custom types like `projects` included). Can set taxonomies, sideload a featured image from an external URL, and write Rank Math SEO meta in the same call.
+
+Permission is gated by the current user's create capability for the target post type (`$post_type_object->cap->create_posts`, usually `edit_posts` or a type-specific cap), not by a hardcoded list of allowed types.
 
 **Input**
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `title` | string | — | Post title. **Required.** |
 | `content` | string | — | HTML body content. **Required.** |
-| `post_type` | string | `post` | `post` or `page` |
+| `post_type` | string | `post` | Any registered post type slug — `post`, `page`, `projects`, … |
 | `status` | string | `draft` | `draft`, `pending`, `publish`, or `private` |
 | `slug` | string | auto | URL slug. Generated from the title if omitted |
 | `excerpt` | string | `""` | Manual excerpt |
-| `categories` | array | `[]` | Category names or slugs. Auto-created if missing. Posts only |
-| `tags` | array | `[]` | Tag names. Auto-created if missing. Posts only |
+| `categories` | array | `[]` | Category names or slugs. Auto-created if missing. Applied only if the post type is registered with the `category` taxonomy |
+| `tags` | array | `[]` | Tag names. Auto-created if missing. Applied only if the post type is registered with the `post_tag` taxonomy |
 | `author_id` | integer | current user | WP user ID for the author |
 | `featured_image_url` | string | `""` | External URL to sideload as the featured image |
 | `meta` | object | — | Rank Math meta: `seo_title`, `seo_description`, `focus_keyword`, `canonical`, `schema_type`, `robots` |
 
 **Output:** `{ success: bool, post_id: int, edit_url: string, view_url: string, status: string, slug: string, post_type: string, featured_image_id: int, meta_updated: [] }`
 
-Categories and tags are ignored for `post_type: page`. A failed featured-image sideload does not fail the call — the post is still created and `featured_image_id` stays `0`.
+Categories and tags are applied based on what the post type is actually registered with (`is_object_in_taxonomy()`), so they work for a custom type that declares them and are ignored for one that doesn't. An unregistered `post_type` is rejected with the list of registered types in the error. A failed featured-image sideload does not fail the call — the post is still created and `featured_image_id` stays `0`.
 
 ---
 
 ### 14. `postedsocial/update-post`
-Updates an existing post or page. **Only the fields you pass are changed** — anything omitted is left exactly as it was, so a partial update is safe.
+Updates an existing post, page, or **any other post type the current user can edit**. **Only the fields you pass are changed** — anything omitted is left exactly as it was, so a partial update is safe.
+
+Permission is gated by `current_user_can( 'edit_post', $post_id )` rather than a post-type allowlist, so custom types like `projects` work without further changes.
 
 **Input**
 | Parameter | Type | Description |
@@ -212,8 +216,8 @@ Updates an existing post or page. **Only the fields you pass are changed** — a
 | `status` | string | `draft`, `pending`, `publish`, or `private` |
 | `slug` | string | New URL slug. Pass `""` to let WordPress regenerate it from the title (takes effect once the post is published) |
 | `excerpt` | string | New excerpt. Pass `""` to clear it |
-| `categories` | array | Replaces existing categories. Auto-created if missing. Pass `[]` to clear. Posts only |
-| `tags` | array | Replaces existing tags. Auto-created if missing. Pass `[]` to clear. Posts only |
+| `categories` | array | Replaces existing categories. Auto-created if missing. Pass `[]` to clear. Applied only if the post type is registered with the `category` taxonomy |
+| `tags` | array | Replaces existing tags. Auto-created if missing. Pass `[]` to clear. Applied only if the post type is registered with the `post_tag` taxonomy |
 | `author_id` | integer | WP user ID for the author |
 | `featured_image_url` | string | External URL to sideload, replacing any existing featured image |
 | `meta` | object | Rank Math meta, same keys as `create-post` |
@@ -225,9 +229,9 @@ Updates an existing post or page. **Only the fields you pass are changed** — a
 - **Omitted vs. empty.** Omitting a key leaves the field untouched. Passing `""` clears `excerpt`, and hands `slug` back to WordPress to regenerate from the title. `title` and `content` reject `""` outright rather than silently blanking the post — omit them instead.
 - **`content` replaces, it does not append.** Read the current body with `get-content` first if you intend to extend it.
 - **`categories` / `tags` replace the whole set** rather than adding to it. Pass the full intended list.
-- **`updated` vs. `skipped`.** `updated` lists the fields that actually changed. `skipped` explains anything that was requested but not applied — categories/tags on a page, or a featured-image sideload that failed — so a partial success is never silent.
+- **`updated` vs. `skipped`.** `updated` lists the fields that actually changed. `skipped` explains anything that was requested but not applied — a taxonomy the post type isn't registered with, or a featured-image sideload that failed — so a partial success is never silent.
 - **`meta` only writes non-empty values,** matching `update-seo-meta`. It cannot clear an existing SEO field.
-- **Posts and pages only.** Any other post type is rejected with an error rather than partially updated.
+- **Any post type, gated by capability.** There is no post-type allowlist. A user without `edit_post` on the target is rejected up front, before any field is written.
 - **Bricks pages.** This ability writes `post_content`. Pages built with Bricks store their content in `_bricks_page_content_2` and are unaffected by it — use `update-bricks-content` for those.
 
 ---
@@ -254,6 +258,11 @@ The plugin adds a **Page Schemas (JSON-LD)** meta box to posts and pages in the 
 ---
 
 ## Changelog
+
+### 2.9
+- `create-post` and `update-post` now work with **any registered post type**, not just `post` and `page`
+- Replaced the hardcoded post-type allowlists with real capability checks: `create_posts` for the target type in `create-post`, `current_user_can( 'edit_post', $post_id )` in `update-post`. These are the first capability checks on any ability in this plugin — every `permission_callback` is still `__return_true`
+- Categories and tags are now applied via `is_object_in_taxonomy()` instead of assuming `post`, so custom types that register them work
 
 ### 2.8
 - Added `postedsocial/update-post` — partial updates to an existing post or page, with `updated`/`skipped` reporting

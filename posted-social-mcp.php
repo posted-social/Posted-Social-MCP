@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Posted Social MCP Abilities
  * Description: Exposes site content, SEO data, structure, and Bricks Builder content to AI via MCP.
- * Version: 2.8
+ * Version: 2.9
  * Author: Posted Social
  */
 
@@ -698,18 +698,18 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Create Post',
-            'description'         => 'Creates a new WordPress post or page. Required: title, content. Optional: post_type (post|page, default post), status (draft|pending|publish|private, default draft), slug, excerpt, categories, tags, author_id, featured_image_url, meta (Rank Math SEO meta in same call). Returns post_id, edit_url, and view_url.',
+            'description'         => 'Creates a new WordPress post, page, or any other registered post type (e.g. projects). Permission is gated by the current user\'s create capability for that post type. Required: title, content. Optional: post_type (any registered type, default post), status (draft|pending|publish|private, default draft), slug, excerpt, categories, tags, author_id, featured_image_url, meta (Rank Math SEO meta in same call). Returns post_id, edit_url, and view_url.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
                     'title'              => array( 'type' => 'string', 'description' => 'Post title. Required.' ),
                     'content'            => array( 'type' => 'string', 'description' => 'HTML body content. Required.' ),
-                    'post_type'          => array( 'type' => 'string', 'description' => '"post" or "page". Default "post".', 'default' => 'post' ),
+                    'post_type'          => array( 'type' => 'string', 'description' => 'Any registered post type slug, e.g. "post", "page", "projects". Default "post".', 'default' => 'post' ),
                     'status'             => array( 'type' => 'string', 'description' => '"draft", "pending", "publish", or "private". Default "draft".', 'default' => 'draft' ),
                     'slug'               => array( 'type' => 'string', 'description' => 'URL slug. Auto-generated from title if omitted.', 'default' => '' ),
                     'excerpt'            => array( 'type' => 'string', 'description' => 'Manual excerpt. Optional.', 'default' => '' ),
-                    'categories'         => array( 'type' => 'array', 'description' => 'Category names or slugs. Auto-created if missing. Posts only.', 'default' => array() ),
-                    'tags'               => array( 'type' => 'array', 'description' => 'Tag names. Auto-created if missing. Posts only.', 'default' => array() ),
+                    'categories'         => array( 'type' => 'array', 'description' => 'Category names or slugs. Auto-created if missing. Applied only if the post type is registered with the category taxonomy.', 'default' => array() ),
+                    'tags'               => array( 'type' => 'array', 'description' => 'Tag names. Auto-created if missing. Applied only if the post type is registered with the post_tag taxonomy.', 'default' => array() ),
                     'author_id'          => array( 'type' => 'integer', 'description' => 'WP user ID for author. Defaults to current user.', 'default' => 0 ),
                     'featured_image_url' => array( 'type' => 'string', 'description' => 'External URL to sideload as featured image. Optional.', 'default' => '' ),
                     'meta'               => array( 'type' => 'object', 'description' => 'Optional Rank Math meta in same call: seo_title, seo_description, focus_keyword, canonical, schema_type, robots.' ),
@@ -742,7 +742,7 @@ function ps_register_abilities() {
         array(
             'category'            => 'postedsocial',
             'label'               => 'Update Post',
-            'description'         => 'Updates an existing WordPress post or page. Only the fields you pass are changed — omitted fields are left untouched. Required: post_id. Optional: title, content, status, slug, excerpt, categories, tags, author_id, featured_image_url, meta (Rank Math SEO meta in same call). Returns the list of fields actually updated.',
+            'description'         => 'Updates an existing post, page, or any other post type the current user can edit (permission is gated by current_user_can edit_post). Only the fields you pass are changed — omitted fields are left untouched. Required: post_id. Optional: title, content, status, slug, excerpt, categories, tags, author_id, featured_image_url, meta (Rank Math SEO meta in same call). Returns the list of fields actually updated.',
             'input_schema'        => array(
                 'type'       => 'object',
                 'properties' => array(
@@ -752,8 +752,8 @@ function ps_register_abilities() {
                     'status'             => array( 'type' => 'string', 'description' => '"draft", "pending", "publish", or "private". Omit to leave unchanged.' ),
                     'slug'               => array( 'type' => 'string', 'description' => 'New URL slug. Omit to leave unchanged. Pass "" to let WordPress regenerate it from the title (applies once the post is published).' ),
                     'excerpt'            => array( 'type' => 'string', 'description' => 'New manual excerpt. Omit to leave unchanged. Pass "" to clear it.' ),
-                    'categories'         => array( 'type' => 'array', 'description' => 'Category names or slugs. Replaces existing categories. Auto-created if missing. Pass [] to clear. Posts only.' ),
-                    'tags'               => array( 'type' => 'array', 'description' => 'Tag names. Replaces existing tags. Auto-created if missing. Pass [] to clear. Posts only.' ),
+                    'categories'         => array( 'type' => 'array', 'description' => 'Category names or slugs. Replaces existing categories. Auto-created if missing. Pass [] to clear. Applied only if the post type is registered with the category taxonomy.' ),
+                    'tags'               => array( 'type' => 'array', 'description' => 'Tag names. Replaces existing tags. Auto-created if missing. Pass [] to clear. Applied only if the post type is registered with the post_tag taxonomy.' ),
                     'author_id'          => array( 'type' => 'integer', 'description' => 'WP user ID for author. Omit to leave unchanged.' ),
                     'featured_image_url' => array( 'type' => 'string', 'description' => 'External URL to sideload and set as the featured image, replacing any existing one. Omit to leave unchanged.' ),
                     'meta'               => array( 'type' => 'object', 'description' => 'Optional Rank Math meta in same call: seo_title, seo_description, focus_keyword, canonical, schema_type, robots. Non-empty values only; use update-seo-meta semantics.' ),
@@ -1260,10 +1260,31 @@ function ps_create_post_execute( $input ) {
         return array( 'success' => false, 'error' => 'Content is required.' );
     }
 
-    // post_type validation
+    // post_type validation. Any registered post type is allowed; the capability
+    // check below is the real gate on what the current user may create.
     $post_type = isset( $input['post_type'] ) ? sanitize_key( $input['post_type'] ) : 'post';
-    if ( ! in_array( $post_type, array( 'post', 'page' ), true ) ) {
-        return array( 'success' => false, 'error' => 'post_type must be "post" or "page".' );
+    $pt_object = get_post_type_object( $post_type );
+    if ( ! $pt_object ) {
+        return array(
+            'success' => false,
+            'error'   => sprintf(
+                'Unknown post type "%s". Registered post types: %s.',
+                $post_type,
+                implode( ', ', get_post_types( array(), 'names' ) )
+            ),
+        );
+    }
+
+    $create_cap = ! empty( $pt_object->cap->create_posts ) ? $pt_object->cap->create_posts : 'edit_posts';
+    if ( ! current_user_can( $create_cap ) ) {
+        return array(
+            'success' => false,
+            'error'   => sprintf(
+                'You do not have permission to create "%s" content (missing capability: %s).',
+                $post_type,
+                $create_cap
+            ),
+        );
     }
 
     // status validation
@@ -1300,33 +1321,18 @@ function ps_create_post_execute( $input ) {
         return array( 'success' => false, 'error' => $post_id->get_error_message() );
     }
 
-    // Categories (post type only). Accepts names or slugs; auto-creates if missing.
-    if ( 'post' === $post_type && ! empty( $input['categories'] ) && is_array( $input['categories'] ) ) {
-        $cat_ids = array();
-        foreach ( $input['categories'] as $cat ) {
-            $cat = sanitize_text_field( $cat );
-            if ( empty( $cat ) ) continue;
-
-            $term = get_term_by( 'slug', sanitize_title( $cat ), 'category' );
-            if ( ! $term ) {
-                $term = get_term_by( 'name', $cat, 'category' );
-            }
-            if ( ! $term ) {
-                $new = wp_insert_term( $cat, 'category' );
-                if ( ! is_wp_error( $new ) && isset( $new['term_id'] ) ) {
-                    $cat_ids[] = intval( $new['term_id'] );
-                }
-            } else {
-                $cat_ids[] = intval( $term->term_id );
-            }
-        }
+    // Categories. Applied to any post type registered with the category taxonomy.
+    // Accepts names or slugs; auto-creates if missing.
+    if ( ! empty( $input['categories'] ) && is_array( $input['categories'] ) && is_object_in_taxonomy( $post_type, 'category' ) ) {
+        $cat_ids = ps_resolve_term_ids( $input['categories'], 'category' );
         if ( ! empty( $cat_ids ) ) {
             wp_set_post_categories( $post_id, $cat_ids );
         }
     }
 
-    // Tags (post type only). wp_set_post_tags auto-creates missing tags.
-    if ( 'post' === $post_type && ! empty( $input['tags'] ) && is_array( $input['tags'] ) ) {
+    // Tags. Applied to any post type registered with the post_tag taxonomy.
+    // wp_set_post_tags auto-creates missing tags.
+    if ( ! empty( $input['tags'] ) && is_array( $input['tags'] ) && is_object_in_taxonomy( $post_type, 'post_tag' ) ) {
         $tags = array_filter( array_map( 'sanitize_text_field', $input['tags'] ) );
         if ( ! empty( $tags ) ) {
             wp_set_post_tags( $post_id, $tags );
@@ -1470,10 +1476,17 @@ function ps_update_post_execute( $input ) {
     }
 
     $post_type = $post->post_type;
-    if ( ! in_array( $post_type, array( 'post', 'page' ), true ) ) {
+
+    // Any post type is editable — capability is the gate, not an allowlist.
+    if ( ! current_user_can( 'edit_post', $post_id ) ) {
         return array(
             'success' => false,
-            'error'   => sprintf( 'Post %d has post type "%s". This ability only updates posts and pages.', $post_id, $post_type ),
+            'error'   => sprintf(
+                'You do not have permission to edit post %d ("%s" / %s).',
+                $post_id,
+                get_the_title( $post_id ),
+                $post_type
+            ),
         );
     }
 
@@ -1548,11 +1561,11 @@ function ps_update_post_execute( $input ) {
         if ( ! is_array( $input['categories'] ) ) {
             return array( 'success' => false, 'error' => 'categories must be an array of names or slugs.' );
         }
-        if ( 'post' === $post_type ) {
+        if ( is_object_in_taxonomy( $post_type, 'category' ) ) {
             wp_set_post_categories( $post_id, ps_resolve_term_ids( $input['categories'], 'category' ) );
             $updated[] = 'categories';
         } else {
-            $skipped[] = 'categories (pages have no categories)';
+            $skipped[] = sprintf( 'categories (post type "%s" is not registered with the category taxonomy)', $post_type );
         }
     }
 
@@ -1561,12 +1574,12 @@ function ps_update_post_execute( $input ) {
         if ( ! is_array( $input['tags'] ) ) {
             return array( 'success' => false, 'error' => 'tags must be an array of tag names.' );
         }
-        if ( 'post' === $post_type ) {
+        if ( is_object_in_taxonomy( $post_type, 'post_tag' ) ) {
             $tags = array_values( array_filter( array_map( 'sanitize_text_field', $input['tags'] ) ) );
             wp_set_post_tags( $post_id, $tags );
             $updated[] = 'tags';
         } else {
-            $skipped[] = 'tags (pages have no tags)';
+            $skipped[] = sprintf( 'tags (post type "%s" is not registered with the post_tag taxonomy)', $post_type );
         }
     }
 
